@@ -28,7 +28,8 @@ $ uv run fuel-mcp serve --simulate < /dev/null
 It takes `fuel` (`diesel`, the default, `petrol95` or `petrol98`), and the
 phone's position as `lat`, `lon` and `accuracy_m`. The search widens by the
 position's accuracy, which is taken as 100 m when not given. With no
-position, it asks where.
+position, it asks where. A price more than a week old is never said as
+current: it is given with the day it was last reported.
 
 ## Real prices
 

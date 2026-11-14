@@ -38,3 +38,9 @@ name = "a check sends back the tag from the last answer"
 file = "src/fuel_mcp/sources/drivstoffpriser.py"
 find = 'ask = \{header: meta\[key\] for header, key in CONDITIONAL'
 replace = 'ask: dict[str, str] = {}'
+
+[[rule]]
+name = "a fuel price older than 7 days is never said as current"
+file = "src/fuel_mcp/service.py"
+find = 'current = \[\(p, km\) for p, km in near if now - p.updated_at <= CURRENT_FOR\]'
+replace = 'current = list(near)'

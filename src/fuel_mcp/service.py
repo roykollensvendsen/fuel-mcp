@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from fuel_mcp.geo import distance_km
 from fuel_mcp.model import CREDIT, Fuel, PriceSource, SourceUnavailableError, StationPrice
-from fuel_mcp.speech import spoken_age, spoken_distance, spoken_price
+from fuel_mcp.speech import spoken_age, spoken_date, spoken_distance, spoken_price
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 SEARCH_KM = 5.0
 #: The accuracy assumed when the voice gives none; the phone's precise mode reports about this.
 DEFAULT_ACCURACY_M = 100.0
+#: How long a price may be said as today's; an older one is said with its date.
+CURRENT_FOR = dt.timedelta(days=7)
 
 NO_SOURCE = "No fuel price source is switched on; see the fuel plugin's README."
 WHERE = "Where are you? Share your position, or set home in the fuel plugin's config."
@@ -66,17 +68,29 @@ class FuelService:
         near = [(p, km) for p, km in near if km <= radius_km]
         if not near:
             return _answer(f"I can't see a {fuel.spoken.lower()} price within {round(radius_km)} kilometres.")
-        best, km = min(near, key=lambda pk: (round(pk[0].price, 2), pk[1]))
+        now = self._now()
+        # RULE: a fuel price older than 7 days is never said as current
+        current = [(p, km) for p, km in near if now - p.updated_at <= CURRENT_FOR]
+        if not current:
+            latest, km = max(near, key=lambda pk: (pk[0].updated_at, -pk[1]))
+            say = (
+                f"No {fuel.spoken.lower()} price within {round(radius_km)} kilometres is from the last week. "
+                f"The latest was at {latest.name}, {spoken_price(latest.price)}, {spoken_distance(km)}, "
+                f"last reported {spoken_date(latest.updated_at, now)}."
+            )
+            return _answer(say, station=_station(latest, km, current=False))
+        best, km = min(current, key=lambda pk: (round(pk[0].price, 2), pk[1]))
         say = (
             f"{fuel.spoken} is cheapest at {best.name}, {spoken_price(best.price)}, {spoken_distance(km)}. "
-            f"{best.source}'s price is {spoken_age(best.updated_at, self._now())}."
+            f"{best.source}'s price is {spoken_age(best.updated_at, now)}."
         )
-        return _answer(say, station=_station(best, km))
+        return _answer(say, station=_station(best, km, current=True))
 
 
-def _station(price: StationPrice, km: float) -> dict[str, Any]:
+def _station(price: StationPrice, km: float, *, current: bool) -> dict[str, Any]:
     """The chosen station for a program to read; its coordinates are left out."""
     return {
+        "current": current,
         "name": price.name,
         "brand": price.brand,
         "fuel": price.fuel.value,

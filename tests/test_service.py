@@ -4,6 +4,7 @@
 Every station here is made up and sits near the point 0,0, far out at sea.
 """
 
+import dataclasses
 import datetime as dt
 
 from fuel_mcp.model import CREDIT, Fuel
@@ -85,3 +86,39 @@ def test_the_answer_never_holds_the_position_it_was_given():
     answer = _service().price(Fuel.DIESEL, lat=0.0012345, lon=0.0054321)
     assert "0.0012345" not in str(answer)
     assert "0.0054321" not in str(answer)
+
+
+class _OnlyOld:
+    """A source whose every nearby price is weeks old, as the real export's often are."""
+
+    label = "Drivstoffpriser"
+
+    def prices_near(self, lat, lon, radius_km, fuel):
+        made_up = FakeSource(now=NOW - dt.timedelta(days=40)).prices_near(lat, lon, radius_km, fuel)
+        newest = FakeSource(now=NOW - dt.timedelta(days=12)).prices_near(lat, lon, radius_km, fuel)[:1]
+        return made_up + [dataclasses.replace(p, name="Fake Fuel Newest") for p in newest]
+
+
+def test_a_fuel_price_older_than_7_days_is_never_said_as_current():
+    # Fake Fuel Epsilon has the lowest diesel price nearby, but it is ten days old.
+    answer = _service().price(Fuel.DIESEL, lat=0.0, lon=0.0)
+    assert "Epsilon" not in answer["say"]
+    assert answer["station"]["current"] is True
+
+
+def test_with_only_old_prices_nearby_the_latest_is_given_with_its_date():
+    answer = _service(_OnlyOld()).price(Fuel.DIESEL, lat=0.0, lon=0.0)
+    assert answer["say"] == (
+        "No diesel price within 5 kilometres is from the last week. "
+        "The latest was at Fake Fuel Newest, nineteen eighty-four, 1 kilometre away, "
+        "last reported 20 December 2029."
+    )
+    assert answer["success"] is True
+    assert answer["station"]["current"] is False
+
+
+def test_a_date_this_year_is_said_without_the_year():
+    from fuel_mcp.speech import spoken_date  # noqa: PLC0415
+
+    assert spoken_date(dt.datetime(2030, 5, 15, 9, tzinfo=dt.UTC), NOW) == "15 May"
+    assert spoken_date(dt.datetime(2029, 12, 17, 9, tzinfo=dt.UTC), NOW) == "17 December 2029"
