@@ -22,6 +22,7 @@ SEARCH_KM = 5.0
 #: The accuracy assumed when the voice gives none; the phone's precise mode reports about this.
 DEFAULT_ACCURACY_M = 100.0
 
+NO_SOURCE = "No fuel price source is switched on; see the fuel plugin's README."
 WHERE = "Where are you? Share your position, or set home in the fuel plugin's config."
 
 Answer = dict[str, Any]
@@ -32,12 +33,12 @@ class FuelService:
 
     def __init__(
         self,
-        source: PriceSource,
+        source: PriceSource | None,
         *,
         now: Callable[[], dt.datetime] | None = None,
         home: tuple[float, float] | None = None,
     ) -> None:
-        """`home` is used when the voice gives no position."""
+        """`home` is used when the voice gives no position; no `source` means none is switched on."""
         self._source = source
         self._now = now or (lambda: dt.datetime.now(dt.UTC))
         self._home = home
@@ -50,6 +51,8 @@ class FuelService:
         accuracy_m: float | None = None,
     ) -> Answer:
         """The cheapest `fuel` near the point, or near home, as an answer to read aloud."""
+        if self._source is None:
+            return _answer(NO_SOURCE)
         point = (lat, lon) if lat is not None and lon is not None else self._home
         if point is None:
             return _answer(WHERE)
