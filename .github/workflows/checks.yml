@@ -23,12 +23,9 @@ jobs:
     timeout-minutes: 5
     # Dependabot writes a body line carrying two full commit hashes, which no
     # length rule survives, and its messages are not a person's to fix.
-    # A direct push to main was linted by nothing: the range below only exists
-    # on a pull request, so the job skipped itself and the local hook, which
-    # --no-verify bypasses, was the only check. The range is now worked out for
-    # both events. Dependabot writes a body line carrying two full commit
-    # hashes, which no length rule survives, and its messages are not a
-    # person's to fix.
+    # The range below once existed only on a pull request. A direct push to
+    # main was then linted by nothing but the local hook, which --no-verify
+    # skips. The range is now worked out for both events.
     if: github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
