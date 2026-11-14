@@ -14,3 +14,15 @@
 # file = "src/fuel_mcp/somewhere.py"
 # find = 'if limit_exceeded:'
 # replace = 'if False:'
+
+[[rule]]
+name = "a station beyond the search radius is never chosen"
+file = "src/fuel_mcp/service.py"
+find = 'near = \[\(p, km\) for p, km in near if km <= radius_km\]'
+replace = 'near = list(near)'
+
+[[rule]]
+name = "a price older than a day is said as about"
+file = "src/fuel_mcp/speech.py"
+find = 'if hours >= HOURS_A_DAY:'
+replace = 'if False:'
