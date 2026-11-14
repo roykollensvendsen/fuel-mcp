@@ -29,6 +29,7 @@ decision nobody writes down.
 
 | Id | Decides | Status |
 |---|---|---|
+| [ADR-FM-001](ADR-FM-001-check-the-export-hourly-with-a-conditional-get.md) | Check the open export at most hourly, with a conditional GET | Accepted |
 
 What is deliberately left undone, and what would make each worth doing, is
 [`deferred.md`](deferred.md). A thing left undone with no trigger is a thing
