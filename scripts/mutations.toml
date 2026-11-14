@@ -26,3 +26,15 @@ name = "a price older than a day is said as about"
 file = "src/fuel_mcp/speech.py"
 find = 'if hours >= HOURS_A_DAY:'
 replace = 'if False:'
+
+[[rule]]
+name = "a copy checked within the hour is used without asking"
+file = "src/fuel_mcp/sources/drivstoffpriser.py"
+find = 'if checked is not None and now - checked < CHECK_EVERY:'
+replace = 'if False:'
+
+[[rule]]
+name = "a check sends back the tag from the last answer"
+file = "src/fuel_mcp/sources/drivstoffpriser.py"
+find = 'ask = \{header: meta\[key\] for header, key in CONDITIONAL'
+replace = 'ask: dict[str, str] = {}'

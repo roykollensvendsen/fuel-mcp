@@ -1,0 +1,187 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""The Drivstoffpriser source, fed responses in the export's real shape.
+
+The field names are the export's own, read on 2026-11-14. The places are
+made up and sit near 0,0.
+"""
+
+import datetime as dt
+import email.utils
+import io
+import json
+import urllib.error
+
+import pytest
+
+from fuel_mcp.model import Fuel, SourceUnavailableError
+from fuel_mcp.sources import drivstoffpriser
+from fuel_mcp.sources.drivstoffpriser import DrivstoffpriserSource, Response
+
+NOW = dt.datetime(2030, 1, 1, 12, 0, tzinfo=dt.UTC)
+STATIONS = {
+    "exportedAt": "2030-01-01T06:00:00.000000+00:00",
+    "count": 2,
+    "stations": [
+        {"id": "osm_1", "name": "Made-up North", "brand": "Brand A", "address": "", "city": "",
+         "latitude": 0.009, "longitude": 0.0},
+        {"city": "Nowhere", "id": "ck_2", "name": "Made-up East", "brand": "Brand B", "address": "1 Road",
+         "latitude": 0.0, "longitude": 0.018},
+    ],
+}  # fmt: skip
+PRICES = {
+    "exportedAt": "2030-01-01T06:00:00.000000+00:00",
+    "count": 4,
+    "prices": [
+        {"stationId": "osm_1", "fuelType": "diesel", "price": 19.84,
+         "updatedAt": "2030-01-01T09:00:00.000000", "reportCount": 3},
+        {"stationId": "ck_2", "fuelType": "diesel", "price": 19.79,
+         "updatedAt": "2029-12-31T06:00:00.000000", "reportCount": 1},
+        {"stationId": "ck_2", "fuelType": "petrol95", "price": 20.49,
+         "updatedAt": "2030-01-01T09:00:00.000000", "reportCount": 1},
+        {"stationId": "user_9", "fuelType": "diesel", "price": 1.0, "updatedAt": "2030-01-01T09:00:00.000000",
+         "reportCount": 1},
+    ],
+}  # fmt: skip
+BODIES = {"stations.json": json.dumps(STATIONS).encode(), "prices.json": json.dumps(PRICES).encode()}
+
+
+class Host:
+    """A pretend GitHub Pages: it records each request and answers like the real one."""
+
+    def __init__(self, *, down=False):
+        self.requests = []
+        self.down = down
+
+    def __call__(self, url, headers):
+        self.requests.append((url.rsplit("/", 1)[-1], dict(headers)))
+        if self.down:
+            msg = "pretend outage"
+            raise OSError(msg)
+        name = url.rsplit("/", 1)[-1]
+        tag = f'"tag-{name}"'
+        if headers.get("If-None-Match") == tag:
+            return Response(304, {}, b"")
+        return Response(200, {"ETag": tag, "Last-Modified": "Tue, 01 Jan 2030 06:00:00 GMT"}, BODIES[name])
+
+
+class Clock:
+    def __init__(self):
+        self.now = NOW
+
+    def __call__(self):
+        return self.now
+
+
+def _source(tmp_path, host, clock=None):
+    return DrivstoffpriserSource(tmp_path, fetch=host, now=clock or Clock())
+
+
+def test_the_export_is_read_into_prices_with_names_and_ages(tmp_path):
+    prices = _source(tmp_path, Host()).prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    by_name = {p.name: p for p in prices}
+    assert set(by_name) == {"Made-up North", "Made-up East"}
+    north = by_name["Made-up North"]
+    assert (north.price, north.brand, north.report_count) == (19.84, "Brand A", 3)
+    assert north.updated_at == dt.datetime(2030, 1, 1, 9, 0, tzinfo=dt.UTC)
+    assert north.source == "Drivstoffpriser"
+
+
+def test_a_price_for_a_station_not_in_the_station_list_is_skipped(tmp_path):
+    prices = _source(tmp_path, Host()).prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert all(p.price != 1.0 for p in prices)
+
+
+def test_only_the_fuel_asked_for_and_only_nearby_stations_come_back(tmp_path):
+    source = _source(tmp_path, Host())
+    assert [p.name for p in source.prices_near(0.0, 0.0, 5.1, Fuel.PETROL95)] == ["Made-up East"]
+    assert source.prices_near(1.0, 1.0, 5.1, Fuel.DIESEL) == []
+
+
+def test_a_copy_checked_within_the_hour_is_used_without_asking(tmp_path):
+    host, clock = Host(), Clock()
+    source = _source(tmp_path, host, clock)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    clock.now += dt.timedelta(minutes=59)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(host.requests) == 2  # one for each file, the first time only
+
+
+def test_a_check_sends_back_the_tag_from_the_last_answer(tmp_path):
+    host, clock = Host(), Clock()
+    source = _source(tmp_path, host, clock)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    clock.now += dt.timedelta(minutes=61)
+    prices = source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    second = dict(host.requests[2:])
+    assert second["prices.json"]["If-None-Match"] == '"tag-prices.json"'
+    assert second["prices.json"]["If-Modified-Since"] == "Tue, 01 Jan 2030 06:00:00 GMT"
+    assert len(prices) == 2  # a 304 keeps the copy
+
+
+def test_a_not_modified_answer_restarts_the_hour(tmp_path):
+    host, clock = Host(), Clock()
+    source = _source(tmp_path, host, clock)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    clock.now += dt.timedelta(minutes=61)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    clock.now += dt.timedelta(minutes=30)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(host.requests) == 4
+
+
+def test_the_copy_outlasts_a_restart(tmp_path):
+    host, clock = Host(), Clock()
+    _source(tmp_path, host, clock).prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    _source(tmp_path, host, clock).prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(host.requests) == 2
+
+
+def test_when_the_host_is_down_the_last_copy_is_used(tmp_path):
+    host, clock = Host(), Clock()
+    _source(tmp_path, host, clock).prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    clock.now += dt.timedelta(hours=2)
+    prices = _source(tmp_path, Host(down=True), clock).prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(prices) == 2
+
+
+def test_when_the_host_is_down_and_there_is_no_copy_the_source_is_unavailable(tmp_path):
+    with pytest.raises(SourceUnavailableError):
+        _source(tmp_path, Host(down=True)).prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+
+
+def test_an_export_in_a_changed_format_is_unavailable_not_a_crash(tmp_path):
+    def broken(_url, _headers):
+        return Response(200, {}, b'{"stations": "not a list"}')
+
+    with pytest.raises(SourceUnavailableError, match="format"):
+        DrivstoffpriserSource(tmp_path, fetch=broken, now=Clock()).prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+
+
+class _Reply(io.BytesIO):
+    status = 200
+    headers = {"ETag": '"x"'}  # noqa: RUF012
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+def test_the_real_fetch_turns_a_304_into_a_response(monkeypatch):
+    seen = {}
+
+    def not_modified(request, **_):
+        seen["agent"] = request.get_header("User-agent")
+        stamp = email.utils.formatdate(usegmt=True)
+        raise urllib.error.HTTPError(request.full_url, 304, "Not Modified", {"Date": stamp}, None)
+
+    monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", not_modified)
+    assert drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}).status == 304
+    assert seen["agent"] == "fuel-mcp"
+
+
+def test_the_real_fetch_reads_a_body(monkeypatch):
+    monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", lambda *_, **__: _Reply(b"{}"))
+    reply = drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {"If-None-Match": '"y"'})
+    assert (reply.status, reply.body, reply.headers["ETag"]) == (200, b"{}", '"x"')
