@@ -36,6 +36,21 @@ _ONES = [
 ]
 _TENS = ["_", "_", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
 HOURS_A_DAY = 24
+#: Spelled out here, not taken from the locale, which on this machine may be Norwegian.
+_MONTHS = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
 _TEN, _HUNDRED = 10, 100
 
 
@@ -81,3 +96,9 @@ def spoken_age(updated_at: dt.datetime, now: dt.datetime) -> str:
         return "under an hour old"
     whole = int(hours)
     return f"{whole} hour{'s' if whole != 1 else ''} old"
+
+
+def spoken_date(moment: dt.datetime, now: dt.datetime) -> str:
+    """A day as it is said: "15 May", with the year only when it is not this one."""
+    day = f"{moment.day} {_MONTHS[moment.month - 1]}"
+    return day if moment.year == now.year else f"{day} {moment.year}"

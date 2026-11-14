@@ -22,6 +22,8 @@ _STATIONS: tuple[tuple[str, float, float, dict[Fuel, tuple[float, float]]], ...]
     ("Beta", 0.0, 0.018, {Fuel.DIESEL: (19.79, 30), Fuel.PETROL95: (20.49, 30)}),
     ("Gamma", 0.0, -0.002, {Fuel.DIESEL: (20.15, 1), Fuel.PETROL95: (20.49, 1), Fuel.PETROL98: (21.99, 1)}),
     ("Delta", 0.09, 0.0, {Fuel.DIESEL: (18.99, 2), Fuel.PETROL95: (19.99, 2)}),
+    # The cheapest diesel nearby, but ten days old, as so much of the real export is.
+    ("Epsilon", 0.0, 0.03, {Fuel.DIESEL: (18.49, 240)}),
 )
 
 
