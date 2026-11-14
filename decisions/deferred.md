@@ -12,3 +12,4 @@ read whenever a decision record is written and when a phase ends.
 | A release workflow and publishing | The first release someone outside will install | A published name is claimed and a published version cannot be reused |
 | `CODEOWNERS` | A second person who reviews | It would name one person as the owner of everything |
 | `pre-commit` as a requirement rather than an option | A second contributor | The gates run in CI, and a hook one person installs is a hook one person maintains |
+| A paid second price source, Drivstoffapp Pro, with the owner's own key | The free open data proves too stale in use, for example the voice often says a price is over a day old | It costs kr 199 a month, and the owner said no on 2026-11-14; the free export is tried first |
