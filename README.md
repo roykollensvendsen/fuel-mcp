@@ -30,6 +30,30 @@ phone's position as `lat`, `lon` and `accuracy_m`. The search widens by the
 position's accuracy, which is taken as 100 m when not given. With no
 position, it asks where.
 
+## Real prices
+
+Without `--simulate`, prices come from Drivstoffpriser. Its export is
+checked at most once an hour, and only when someone asks
+([ADR-FM-001](decisions/ADR-FM-001-check-the-export-hourly-with-a-conditional-get.md)).
+The copy is kept in `~/.cache/fuel-mcp/`.
+
+Settings are optional, and live in `~/.config/fuel-mcp/config.toml`, never
+in this repository. Home is used when the voice gives no position:
+
+```toml
+sources = ["drivstoffpriser"]   # the default; [] switches every source off
+[home]
+lat = 0.0
+lon = 0.0
+```
+
+A mistake in the file is said with the fix:
+
+```console
+$ XDG_CONFIG_HOME=tests/settings-examples uv run fuel-mcp price
+unknown source 'petrolbot'; the known ones are drivstoffpriser. Fix sources in tests/settings-examples/fuel-mcp/config.toml
+```
+
 ## The data
 
 Data: Drivstoffpriser (ODbL), stations © OpenStreetMap contributors.

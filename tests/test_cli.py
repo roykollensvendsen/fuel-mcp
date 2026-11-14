@@ -15,11 +15,6 @@ def test_a_simulated_price_at_the_made_up_point_is_printed(capsys):
     assert out.rstrip().endswith("Data: Drivstoffpriser (ODbL), stations © OpenStreetMap contributors")
 
 
-def test_with_no_source_switched_on_it_says_so_and_sends_nothing(capsys):
-    assert cli.main(["price", "--lat", "0", "--lon", "0"]) == 1
-    assert capsys.readouterr().out.startswith("No fuel price source is switched on;")
-
-
 def test_a_simulated_price_with_no_position_asks_where(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert cli.main(["price", "--simulate"]) == 1

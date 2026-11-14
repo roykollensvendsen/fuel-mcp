@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from fuel_mcp.model import Fuel
 from fuel_mcp.server import build_server, simulated_answer
 from fuel_mcp.service import FuelService
+from fuel_mcp.settings import SettingsError, build_source, cache_folder, config_folder, load_settings
 from fuel_mcp.simulator import FakeSource
 
 #: Every verb this command has. The documentation test requires each one to
@@ -17,7 +19,11 @@ COMMANDS: tuple[str, ...] = ("serve", "price")
 
 
 def _service(*, simulate: bool) -> FuelService:
-    return FuelService(FakeSource() if simulate else None)
+    """The made-up stations, or the sources the local settings switch on, with home."""
+    if simulate:
+        return FuelService(FakeSource())
+    settings = load_settings(config_folder(os.environ))
+    return FuelService(build_source(settings, cache_folder(os.environ)), home=settings.home)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,7 +36,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lon", type=float, help="longitude of the point to search around")
     parser.add_argument("--accuracy-m", type=float, help="how exact the point is, in metres")
     args = parser.parse_args(argv)
-    service = _service(simulate=args.simulate)
+    try:
+        service = _service(simulate=args.simulate)
+    except SettingsError as error:
+        sys.stdout.write(f"{error}\n")
+        return 1
     if args.command == "price":
         answer = service.price(Fuel(args.fuel), lat=args.lat, lon=args.lon, accuracy_m=args.accuracy_m)
         if args.simulate:
