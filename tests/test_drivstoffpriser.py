@@ -185,3 +185,86 @@ def test_the_real_fetch_reads_a_body(monkeypatch):
     monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", lambda *_, **__: _Reply(b"{}"))
     reply = drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {"If-None-Match": '"y"'})
     assert (reply.status, reply.body, reply.headers["ETag"]) == (200, b"{}", '"x"')
+
+
+class Flaky(Host):
+    """A host that can be switched from working to failing, and counts every ask."""
+
+    def __init__(self):
+        super().__init__()
+        self.answer = None  # None works; an OSError instance raises it; an int is that status
+
+    def __call__(self, url, headers):
+        if isinstance(self.answer, OSError):
+            self.requests.append((url.rsplit("/", 1)[-1], dict(headers)))
+            raise self.answer
+        if isinstance(self.answer, int):
+            self.requests.append((url.rsplit("/", 1)[-1], dict(headers)))
+            return Response(self.answer, {}, b"")
+        if isinstance(self.answer, bytes):
+            self.requests.append((url.rsplit("/", 1)[-1], dict(headers)))
+            return Response(200, {"ETag": '"broken"'}, self.answer)
+        return super().__call__(url, headers)
+
+
+def _expired_copy(tmp_path):
+    host, clock = Flaky(), Clock()
+    source = _source(tmp_path, host, clock)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    clock.now += dt.timedelta(hours=2)
+    host.requests.clear()
+    return source, host, clock
+
+
+def test_a_failing_host_is_not_asked_again_for_ten_minutes(tmp_path):
+    source, host, clock = _expired_copy(tmp_path)
+    host.answer = TimeoutError("the host hangs")
+    for _ in range(3):
+        assert len(source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)) == 2  # the copy answers
+        clock.now += dt.timedelta(minutes=3)
+    assert len(host.requests) == 1  # one ask in nine minutes, and the second file was not tried
+    clock.now += dt.timedelta(minutes=2)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(host.requests) == 2
+
+
+def test_an_error_status_backs_off_like_a_failure(tmp_path):
+    source, host, clock = _expired_copy(tmp_path)
+    host.answer = 503
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    clock.now += dt.timedelta(minutes=5)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(host.requests) == 1
+
+
+def test_with_no_copy_a_failing_host_is_said_at_once_and_not_asked_again(tmp_path):
+    host, clock = Flaky(), Clock()
+    host.answer = TimeoutError("the host hangs")
+    source = _source(tmp_path, host, clock)
+    for _ in range(2):
+        with pytest.raises(SourceUnavailableError):
+            source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(host.requests) == 1
+
+
+def test_the_host_is_asked_as_usual_once_it_answers_again(tmp_path):
+    source, host, clock = _expired_copy(tmp_path)
+    host.answer = TimeoutError("the host hangs")
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    host.answer = None
+    clock.now += dt.timedelta(minutes=11)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    clock.now += dt.timedelta(minutes=30)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(host.requests) == 3  # the failed ask, then one for each file, then the hourly copy
+
+
+def test_a_bad_export_keeps_the_good_copy(tmp_path):
+    source, host, _ = _expired_copy(tmp_path)
+    host.answer = b'{"stations": "not a list"}'
+    assert len(source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)) == 2
+    assert json.loads((tmp_path / "stations.json").read_bytes()) == STATIONS
+
+
+def test_one_question_waits_for_at_most_one_timeout():
+    assert drivstoffpriser.TIMEOUT_S <= 6  # the voice gives up after about 15 s
