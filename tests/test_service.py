@@ -30,7 +30,7 @@ class _Placed:
     def __init__(self, *stations):
         self._stations = stations  # (name, kilometres north, price, days old)
 
-    def prices_near(self, lat, lon, radius_km, fuel):  # noqa: ARG002 - all of them; the service's radius is tested
+    def prices_near(self, lat, lon, radius_km, fuel):  # all of them; the service's radius is tested
         return [
             StationPrice(
                 station_id=name,

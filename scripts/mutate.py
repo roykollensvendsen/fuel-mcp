@@ -30,6 +30,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -170,6 +171,25 @@ def sweep() -> None:
         _remove(left)
 
 
+def stop_cleanly() -> None:
+    """Let a run told to stop (SIGTERM) put the tree back and remove its files first.
+
+    By default the signal ends Python at once, with no `finally` run: a mutated file
+    stays switched off and the suite's temporary files stay behind.
+    """
+
+    def stop(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, stop)
+
+
+def _tidy() -> None:
+    """Remove the run's temporary folder once nothing is left in it."""
+    with contextlib.suppress(OSError):
+        MUTATE_TMP.rmdir()
+
+
 def repair() -> None:
     """Put back a file an earlier run was killed in the middle of mutating."""
     if not RECOVERY.is_file():
@@ -272,14 +292,20 @@ def nothing_to_check(rules: list[dict[str, Any]]) -> int | None:
     return None
 
 
+def _start() -> None:
+    """Make the run stop cleanly, and put right what a killed earlier run left behind."""
+    stop_cleanly()
+    repair()
+    sweep()
+
+
 def main() -> int:
     """Mutate every rule in turn, restore the tree, and report."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", type=pathlib.Path, help="write the run's figures here, for the checks")
     args = parser.parse_args()
 
-    repair()
-    sweep()
+    _start()
     rules = all_rows()
     if (empty := nothing_to_check(rules)) is not None:
         return empty
@@ -318,6 +344,7 @@ def main() -> int:
         if standing is not None:
             restore(*standing)
         RECOVERY.unlink(missing_ok=True)
+        _tidy()
 
     survived = [name for name, _, count, _, _ in results if count == 0]
     lucky = [name for name, _, count, _, own in results if count and not own]
