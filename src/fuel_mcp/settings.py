@@ -6,8 +6,8 @@ They live in ``$XDG_CONFIG_HOME/fuel-mcp/config.toml``, normally
 
     sources = ["drivstoffpriser"]   # none is on until it is listed here
     fuel = "petrol95"               # when a question names none; diesel if not set
-    farthest_km = 20                # how far the search steps out at most; 20 if not set
-    old_after_days = 30             # a latest price older than this is said as only an old price
+    farthest_km = 20                # how far the search steps out, 1 to 100 km; 20 if not set
+    old_after_days = 30             # older than this is said as only an old price, 7 to 3650; 30
     [home]                          # used when the voice gives no position
     lat = 0.0
     lon = 0.0
@@ -18,12 +18,14 @@ A source not listed is fully off: its module is never imported.
 from __future__ import annotations
 
 import importlib
+import math
 import pathlib
 import tomllib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from fuel_mcp.model import Fuel
+from fuel_mcp.service import Choices
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -47,8 +49,8 @@ class Settings:
     home: tuple[float, float] | None = field(default=None, repr=False)
     sources: tuple[str, ...] = DEFAULT_SOURCES
     fuel: Fuel = Fuel.DIESEL
-    farthest_km: float = 20.0
-    old_after_days: int = 30
+    farthest_km: float = Choices.farthest_km
+    old_after_days: int = Choices.old_after_days
 
 
 def _folder(env: Mapping[str, str], variable: str, fallback: str) -> pathlib.Path:
@@ -97,23 +99,36 @@ def load_settings(folder: pathlib.Path) -> Settings:
         home=_home(table.get("home"), path),
         sources=tuple(sources),
         fuel=_fuel(table, path),
-        farthest_km=float(_positive(table, "farthest_km", 20.0, path, whole=False)),
-        old_after_days=int(_positive(table, "old_after_days", 30, path, whole=True)),
+        farthest_km=float(_within(table, "farthest_km", FARTHEST_KM_LIMITS, path, whole=False)),
+        old_after_days=int(_within(table, "old_after_days", OLD_AFTER_DAYS_LIMITS, path, whole=True)),
     )
 
 
-def _positive(
-    table: Mapping[str, object], key: str, default: float, path: pathlib.Path, *, whole: bool
+#: The farthest search an owner may set, in km. Past 100 the nearest price is no answer to a driver.
+FARTHEST_KM_LIMITS = (1, 100)
+#: The old-price limit an owner may set, in days. Under 7 nothing would be called old, since a
+#: price is current for a week; past ten years the limit means nothing.
+OLD_AFTER_DAYS_LIMITS = (7, 3650)
+
+
+def _within(
+    table: Mapping[str, object], key: str, limits: tuple[int, int], path: pathlib.Path, *, whole: bool
 ) -> float:
-    """The number set for `key`, or `default`; anything but a positive number names the fix."""
+    """The number set for `key`, or its default; anything outside `limits` names the fix.
+
+    TOML allows inf and nan. Either would pass a plain "above 0": inf would step out for ever.
+    """
+    default = getattr(Choices(), key)
     value = table.get(key, default)
     kinds = (int,) if whole else (int, float)
-    # RULE: a search setting that is not a positive number names the fix and the file
-    if isinstance(value, bool) or not isinstance(value, kinds) or value <= 0:
+    number = value if isinstance(value, kinds) and not isinstance(value, bool) else math.nan
+    low, high = limits
+    # RULE: a search setting outside its limits names the fix and the file
+    if not (math.isfinite(number) and low <= number <= high):
         kind = "a whole number" if whole else "a number"
-        msg = f"{key} must be {kind} above 0, such as {key} = {default:g}. Fix {key} in {path}"
+        msg = f"{key} must be {kind} from {low} to {high}, such as {key} = {default:g}. Fix {key} in {path}"
         raise SettingsError(msg)
-    return value
+    return number
 
 
 def _fuel(table: Mapping[str, object], path: pathlib.Path) -> Fuel:
