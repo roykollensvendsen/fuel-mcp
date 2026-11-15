@@ -160,3 +160,22 @@ def test_the_spoken_answer_never_holds_a_raw_station_name():
     assert answer["say"].startswith("Diesel is cheapest at Fake Fuel, nineteen seventy-nine")
     assert "\n" not in answer["say"]
     assert "garage" not in str(answer)
+
+
+class _Mistyped:
+    """Prices a reporter mistyped: one in øre, one with a digit too many."""
+
+    label = "Drivstoffpriser"
+
+    def prices_near(self, lat, lon, radius_km, fuel):
+        found = FakeSource(now=NOW).prices_near(lat, lon, radius_km, fuel)
+        return [
+            dataclasses.replace(found[0], price=1.98),
+            dataclasses.replace(found[1], price=198.4),
+            *found[2:],
+        ]
+
+
+def test_a_price_no_pump_would_show_is_skipped():
+    answer = _service(_Mistyped()).price(Fuel.DIESEL, lat=0.0, lon=0.0)
+    assert answer["station"]["price"] == 20.15  # Gamma, the cheapest left
