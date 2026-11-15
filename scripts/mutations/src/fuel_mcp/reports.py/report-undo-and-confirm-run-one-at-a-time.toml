@@ -1,0 +1,5 @@
+[[rule]]
+name = "report undo and confirm run one at a time"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*with self\._lock:$'
+replace = 'if True:'

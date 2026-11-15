@@ -13,7 +13,7 @@ They live in ``$XDG_CONFIG_HOME/fuel-mcp/config.toml``, normally
     own_report_keep_hours = 12      # how long it is kept, from the hours above to 2160; 12
     price_low = 10                  # a price below this is not believed, per litre; 10
     price_high = 40                 # a price above this is not believed; 40
-    send_timeout_s = 15             # how long one send to a sender may take, 1 to 60 seconds; 15
+    send_timeout_s = 20             # how long all the sends after one yes may take, 1 to 25 seconds; 20
     [home]                          # used when the voice gives no position
     lat = 0.0
     lon = 0.0
@@ -70,7 +70,7 @@ class Settings:
     own_report_keep_hours: int = 12
     price_low: float = 10.0
     price_high: float = 40.0
-    send_timeout_s: float = 15.0
+    send_timeout_s: float = 20.0
     #: The owner's own names for stations: they say where he goes, so never in a repr.
     station_names: Mapping[str, str] = field(default_factory=dict, repr=False)
     #: The owner's own senders, as listed; their folders are private, so never in a repr.
@@ -145,8 +145,8 @@ OWN_REPORT_HOURS_LIMITS = (1, 168)
 OWN_REPORT_KEEP_HOURS_LIMITS = (1, 2160)
 #: The believable price bounds an owner may set, per litre.
 PRICE_LIMITS = (1, 100)
-#: How long one send to a private sender may take, in seconds.
-SEND_TIMEOUT_LIMITS = (1, 60)
+#: How long all the sends after one yes may take together, in seconds: below the voice's 30 s.
+SEND_TIMEOUT_LIMITS = (1, 25)
 #: Each number's default when the owner sets none.
 DEFAULTS: dict[str, float] = {
     "farthest_km": Choices.farthest_km,
@@ -155,7 +155,7 @@ DEFAULTS: dict[str, float] = {
     "own_report_keep_hours": 12,
     "price_low": 10,
     "price_high": 40,
-    "send_timeout_s": 15,
+    "send_timeout_s": 20,
 }
 #: Every sink the public package has. A private sender goes in [[private_sinks]].
 KNOWN_SINKS = ("local",)

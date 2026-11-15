@@ -1,0 +1,5 @@
+[[rule]]
+name = "all sends share one deadline"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*worker\.join\(max\(0\.0, deadline - time\.monotonic\(\)\)\)$'
+replace = 'worker.join(self._choices.send_timeout_s)'

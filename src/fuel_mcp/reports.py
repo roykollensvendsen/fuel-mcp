@@ -19,9 +19,10 @@ import logging
 import re
 import secrets
 import threading
+import time
 import unicodedata
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Concatenate
 
 from fuel_mcp.geo import distance_km
 from fuel_mcp.model import Fuel, OwnReport, SinkRefusedError, SourceUnavailableError, StationPrice
@@ -63,7 +64,8 @@ class ReportChoices:
     fuel: Fuel = Fuel.DIESEL
     price_low: float = 10.0
     price_high: float = 40.0
-    send_timeout_s: float = 15.0
+    #: How long all the sends of one yes may take together; below the voice's 30 s for a tool.
+    send_timeout_s: float = 20.0
     farthest_km: float = FARTHEST_KM
     #: The owner's own names for stations, matched first: "my usual" = "<station id>".
     station_names: Mapping[str, str] = field(default_factory=dict)
@@ -87,6 +89,20 @@ class _Asked:
     asked_at: dt.datetime
 
 
+def _one_at_a_time[**P, R](
+    method: Callable[Concatenate[Reporter, P], R],
+) -> Callable[Concatenate[Reporter, P], R]:
+    """`method` run under the reporter's lock, after the record of old sends is dropped."""
+
+    def locked(self: Reporter, /, *args: P.args, **kwargs: P.kwargs) -> R:
+        # RULE: report undo and confirm run one at a time
+        with self._lock:
+            self._forget_old_sends()
+            return method(self, *args, **kwargs)
+
+    return locked
+
+
 class Reporter:
     """Saves the owner's reports, takes the latest back, and sends one only on his yes."""
 
@@ -107,7 +123,11 @@ class Reporter:
         self._choices = choices or ReportChoices()
         self._asked: dict[str, _Asked] = {}
         self._sent: dict[tuple[str, dt.datetime], list[str]] = {}
+        #: The tools run on worker threads: one report, undo or confirm at a time, so the own list's
+        #: read and write, the questions and the record of sends are never changed by two at once.
+        self._lock = threading.Lock()
 
+    @_one_at_a_time
     def report(  # noqa: PLR0913 - the tool's own arguments, as the voice sends them
         self,
         price: float,
@@ -146,6 +166,7 @@ class Reporter:
         self._asked[token] = _Asked(report, frozenset(labels), report.reported_at)
         return {**_said(f"{saved} Send it to {_and(labels)} too?", success=True), "token": token}
 
+    @_one_at_a_time
     def undo(self) -> Answer:
         """Take the latest report off the owner's list, if it is under 10 minutes old."""
         try:
@@ -154,7 +175,8 @@ class Reporter:
             return _said(str(error))
         if gone is None:
             return _said(f"There's no report from the last {UNDO_WITHIN.seconds // 60} minutes to take back.")
-        self._asked = {token: asked for token, asked in self._asked.items() if asked.report != gone}
+        for token in [token for token, asked in self._asked.items() if asked.report == gone]:
+            del self._asked[token]
         what = f"{gone.fuel.spoken.lower()} {spoken_price(gone.price)} at {gone.station_name}"
         said = f"Taken off your own list: {what}."
         sent = self._sent.pop((gone.station_id, gone.reported_at), [])
@@ -162,6 +184,7 @@ class Reporter:
             said += f" It was already sent to {_and(sent)}; that can't be taken back from here."
         return _said(said, success=True)
 
+    @_one_at_a_time
     def confirm(self, token: str, only: Collection[str] | None = None) -> Answer:
         """Send the asked-about report to the services its question named, or to `only` of them."""
         if not self.sinks.private:
@@ -176,35 +199,33 @@ class Reporter:
         if isinstance(chosen, str):
             self._asked[token] = asked  # a misheard name uses nothing up: the yes can come again
             return _said(chosen)
-        said = [self._send(sink, asked.report) for sink in self.sinks.private if sink.label in chosen]
+        said = self._send_all([s for s in self.sinks.private if s.label in chosen], asked.report)
         return _said(" ".join(said) or "Nothing was sent.", success=any(s.startswith("Sent") for s in said))
 
-    def _send(self, sink: PriceSink, report: OwnReport) -> str:
-        """One send, within its own time limit; what happened, as a sentence."""
-        outcome: list[str] = []
-        key = (report.station_id, report.reported_at)
-
-        def send() -> None:
-            try:
-                sink.take(report)
-            # RULE: one refusing service leaves the others sent
-            except SinkRefusedError as refused:
-                outcome.append(f"Not sent to {sink.label}: {str(refused).rstrip('.')}.")
-            except (Exception, SystemExit) as error:  # noqa: BLE001 - a sender's crash is said, never raised
-                log.warning("fuel-mcp: private sink %s failed: %s", sink.label, type(error).__name__)
-                outcome.append(f"Not sent to {sink.label}: it failed. The log says why.")
+    def _send_all(self, sinks: list[PriceSink], report: OwnReport) -> list[str]:
+        """Every send started at once and waited for until one deadline; what happened, as sentences."""
+        sends = [(sink, *_started(sink, report)) for sink in sinks]
+        deadline = time.monotonic() + self._choices.send_timeout_s
+        said = []
+        for sink, worker, outcome in sends:
+            # RULE: all sends share one deadline
+            worker.join(max(0.0, deadline - time.monotonic()))
+            # RULE: a send past its time limit is said as may have been sent
+            if worker.is_alive() or not outcome:
+                said.append(f"It may have been sent to {sink.label}: it didn't answer in time.")
             else:
-                self._sent.setdefault(key, []).append(sink.label)
-                outcome.append(f"Sent to {sink.label}.")
+                said.append(outcome[0])
+            if worker.is_alive() or (outcome and outcome[0].startswith("Sent")):  # it may still arrive
+                self._sent.setdefault((report.station_id, report.reported_at), []).append(sink.label)
+        return said
 
-        worker = threading.Thread(target=send, name=f"fuel-mcp-send-{sink.label}", daemon=True)
-        worker.start()
-        # RULE: a send past its time limit is said as may have been sent
-        worker.join(self._choices.send_timeout_s)
-        if worker.is_alive() or not outcome:
-            self._sent.setdefault(key, []).append(sink.label)  # it may still arrive
-            return f"It may have been sent to {sink.label}: it didn't answer in time."
-        return outcome[0]
+    def _forget_old_sends(self) -> None:
+        """Drop the record of sends that undo can no longer reach."""
+        now = self._now()
+        # RULE: a sent record is kept only as long as undo can use it
+        old = [key for key in self._sent if now - key[1] > UNDO_WITHIN]
+        for key in old:
+            del self._sent[key]
 
     def _station(self, name: str | None, where: Where | None) -> Station | str:
         """The one station meant, or the sentence that asks or says why not."""
@@ -299,6 +320,27 @@ class OwnReports:
                 )
             )
         return found
+
+
+def _started(sink: PriceSink, report: OwnReport) -> tuple[threading.Thread, list[str]]:
+    """A send on a thread of its own, and the list its one sentence will be put in."""
+    outcome: list[str] = []
+
+    def send() -> None:
+        try:
+            sink.take(report)
+        # RULE: one refusing service leaves the others sent
+        except SinkRefusedError as refused:
+            outcome.append(f"Not sent to {sink.label}: {str(refused).rstrip('.')}.")
+        except (Exception, SystemExit) as error:  # noqa: BLE001 - a sender's crash is said, never raised
+            log.warning("fuel-mcp: private sink %s failed: %s", sink.label, type(error).__name__)
+            outcome.append(f"Not sent to {sink.label}: it failed. The log says why.")
+        else:
+            outcome.append(f"Sent to {sink.label}.")
+
+    worker = threading.Thread(target=send, name=f"fuel-mcp-send-{sink.label}", daemon=True)
+    worker.start()
+    return worker, outcome
 
 
 def _narrowed(only: Collection[str], named: frozenset[str]) -> frozenset[str] | str:

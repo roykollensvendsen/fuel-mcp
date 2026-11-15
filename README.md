@@ -94,11 +94,12 @@ apart, and never chosen over a reported one.
 
 With a sender of your own set up, the voice then asks "Send it to … too?". Only
 your yes sends it, once, within 2 minutes. "Only <service>" narrows it. One
-service refusing leaves the others sent. A sender silent past `send_timeout_s`
-is said as "may have been sent". Undo never takes back what was sent.
+service refusing leaves the others sent. All sends start at once. One still
+silent after `send_timeout_s` is said as "may have been sent". Undo never
+takes back what was sent.
 
 ```toml
-send_timeout_s = 15         # how long one send may take, 1 to 60 seconds; 15 when not set
+send_timeout_s = 20         # how long all the sends may take, 1 to 25 seconds; 20 when not set
 [station_names]             # your own names for stations, matched first
 "my usual" = "osm_1"        # a station's id from the list; this one is made up
 ```
