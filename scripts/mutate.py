@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
@@ -345,12 +346,43 @@ def _start() -> None:
     sweep()
 
 
+def one_run_per_checkout() -> int:
+    """Lock the checkout for this run, without waiting; the open folder holds the lock.
+
+    Two runs of one checkout would mutate the same files and sweep each other's folders.
+    """
+    fd = os.open(ROOT, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        # RULE: one mutation run per checkout
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        msg = f"A mutation run of {ROOT} is already running. Wait for it to end, or stop it, and run again."
+        raise SystemExit(msg) from None
+    return fd
+
+
 def main() -> int:
-    """Mutate every rule in turn, restore the tree, and report."""
+    """Mutate every rule in turn, restore the tree, and report; or, with --repair-only, only repair."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", type=pathlib.Path, help="write the run's figures here, for the checks")
+    parser.add_argument(
+        "--repair-only", action="store_true", help="put back a file a killed run left mutated, and stop"
+    )
     args = parser.parse_args()
+    lock = one_run_per_checkout()
+    try:
+        if args.repair_only:
+            repair()
+            # RULE: a repair-only run puts back a killed run's file and does nothing else
+            return 0  # and nothing else
+        return _every_rule(args.json)
+    finally:
+        os.close(lock)
 
+
+def _every_rule(figures_to: pathlib.Path | None) -> int:
+    """Mutate every rule in turn, restore the tree, and report."""
     _start()
     rules = all_rows()
     if (empty := nothing_to_check(rules)) is not None:
@@ -396,7 +428,7 @@ def main() -> int:
     lucky = [name for name, _, count, _, own in results if count and not own]
     # Written before a failing run exits: a run where a rule survived is exactly
     # what the checks' page has to show, not the last run that passed.
-    publish(args.json, results, survived, lucky)
+    publish(figures_to, results, survived, lucky)
     proven = len(results) - len(survived) - len(lucky)
     print(f"\n{proven}/{len(results)} rules turned off the test that names them")  # noqa: T201
     if survived:
