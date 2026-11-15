@@ -1,0 +1,5 @@
+[[rule]]
+name = "a private write refuses a link where the file goes"
+file = "src/fuel_mcp/safe_file.py"
+find = '^    if path\.is_symlink\(\):$'
+replace = 'if False:'

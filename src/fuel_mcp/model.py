@@ -61,3 +61,37 @@ class PriceSource(Protocol):
     def prices_near(self, lat: float, lon: float, radius_km: float, fuel: Fuel) -> list[StationPrice]:
         """Every price for `fuel` within `radius_km` of the point; raises SourceUnavailableError."""
         ...
+
+
+@dataclass(frozen=True)
+class OwnReport:
+    """A price the owner reported himself. It holds no position, only the station's id."""
+
+    station_id: str
+    #: The station's name as the source gives it, for reading back.
+    station_name: str
+    fuel: Fuel
+    price: float
+    #: When it was reported: aware, in UTC.
+    reported_at: dt.datetime
+
+
+class SinkRefusedError(Exception):
+    """The sink did not take the report; the message says why, as a sentence."""
+
+
+class PriceSink(Protocol):
+    """Where the owner's own reports go. One module per sink, switched on in local config.
+
+    The public package holds one sink, the owner's own list on this machine. Any other is
+    the owner's own, kept outside this repository and loaded by `fuel_mcp.sinks`.
+    """
+
+    #: The sink's name as it is said in an answer: "your own list".
+    label: str
+    #: True: the report goes to this sink only after the owner's spoken yes.
+    needs_yes: bool
+
+    def take(self, report: OwnReport) -> None:
+        """Keep or send the report; raises SinkRefusedError."""
+        ...

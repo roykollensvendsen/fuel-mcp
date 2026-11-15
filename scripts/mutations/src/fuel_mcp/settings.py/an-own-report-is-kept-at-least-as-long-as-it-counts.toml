@@ -1,0 +1,5 @@
+[[rule]]
+name = "an own report is kept at least as long as it counts"
+file = "src/fuel_mcp/settings.py"
+find = '^    if keep < hours:$'
+replace = 'if False:'

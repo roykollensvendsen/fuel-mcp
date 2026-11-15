@@ -1,0 +1,5 @@
+[[rule]]
+name = "the public package holds no sender"
+file = "src/fuel_mcp/sinks/local.py"
+find = '^import json$'
+replace = 'import json, urllib.request'

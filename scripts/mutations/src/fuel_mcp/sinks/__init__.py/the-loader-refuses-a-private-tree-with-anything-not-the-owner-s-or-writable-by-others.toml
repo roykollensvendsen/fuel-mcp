@@ -1,0 +1,5 @@
+[[rule]]
+name = "the loader refuses a private tree with anything not the owner's or writable by others"
+file = "src/fuel_mcp/sinks/__init__.py"
+find = '^\s*if facts\.st_uid not in owners or \(facts\.st_mode & WRITABLE_BY_OTHERS and not shared\):$'
+replace = 'if False:'
