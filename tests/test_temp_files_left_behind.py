@@ -262,3 +262,72 @@ def test_a_stopped_measurement_removes_its_copy(tmp_path, monkeypatch):
 
 def test_a_second_signal_cannot_cut_the_cleanup_short_of_a_measurement(tmp_path, monkeypatch):
     _ignores_a_second_signal(ROOT / "scripts/ratchet.py", monkeypatch, tmp_path)
+
+
+STEP = """
+import pathlib, signal, sys, time
+here = pathlib.Path(sys.argv[1])
+
+def cleanup(_signum, _frame):
+    (here / "got-int").write_text("")
+    time.sleep(1)  # a step that takes a moment to put things back
+    (here / "cleaned").write_text("")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, cleanup)
+(here / "started").write_text("")
+deadline = time.monotonic() + 10  # a step never told to stop ends by itself
+while time.monotonic() < deadline:
+    time.sleep(0.05)
+"""
+
+#: Stands in for `uv run`: it starts the step and passes no signal on to it.
+LAUNCHER = """
+import signal, subprocess, sys
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+sys.exit(subprocess.run([sys.executable, *sys.argv[1:]]).returncode)
+"""
+
+MEASURING = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ratchet", sys.argv[1])
+ratchet = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ratchet)
+ratchet.stop_cleanly()
+ratchet._run(sys.executable, *sys.argv[2:])
+"""
+
+
+def test_a_stopped_measurement_stops_its_step_and_waits_for_it(tmp_path):
+    """Ctrl-C on the ratchet reaches its step once, through the ratchet, which then waits.
+
+    The step is started through a launcher that passes no signal on, as `uv run` may not:
+    the stop has to reach every process of the step, as Ctrl-C in a terminal would.
+    """
+    (tmp_path / "step.py").write_text(STEP)
+    (tmp_path / "launcher.py").write_text(LAUNCHER)
+    (tmp_path / "measuring.py").write_text(MEASURING)
+    run = subprocess.Popen(
+        [
+            sys.executable,
+            str(tmp_path / "measuring.py"),
+            str(ROOT / "scripts/ratchet.py"),
+            str(tmp_path / "launcher.py"),
+            str(tmp_path / "step.py"),
+            str(tmp_path),
+        ],
+        env={**os.environ, "TMPDIR": str(tmp_path)},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while not (tmp_path / "started").exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert (tmp_path / "started").exists(), "the step never started"
+        run.send_signal(signal.SIGINT)
+        assert run.wait(timeout=30) != 0
+    finally:
+        run.kill()
+    assert (tmp_path / "got-int").exists(), "the ratchet never passed the stop on to its step"
+    assert (tmp_path / "cleaned").exists(), "the ratchet ended before its step had cleaned up"

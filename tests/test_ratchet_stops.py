@@ -13,6 +13,8 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 #: A child that waits to be stopped, then cleans up slowly, counting every stop it gets.
@@ -80,7 +82,7 @@ def _ended(ratchet):
         ratchet.kill()
 
 
-def test_a_stopped_measurement_lets_its_child_clean_up(tmp_path):
+def test_a_stopped_measurement_s_child_cleans_up_before_it_ends(tmp_path):
     """Ctrl-C reaches the child once, through the ratchet, which waits for it to finish."""
     ratchet, temp, marks = _ratchet(tmp_path)
     ratchet.send_signal(signal.SIGINT)
@@ -122,3 +124,31 @@ def test_a_measurement_s_child_writes_to_a_file_never_a_pipe(tmp_path):
     (marks / "go").write_text("")
     _until(marks / "finished", 30)
     assert (marks / "finished").exists(), "the child died once the ratchet was gone"
+
+
+def test_a_step_already_gone_when_the_stop_comes_is_not_an_error(monkeypatch):
+    """The step may end between the stop and the signal; the stop still ends the run as a stop."""
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location("ratchet_gone", ROOT / "scripts/ratchet.py")
+    ratchet = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ratchet)
+
+    class Gone:
+        pid = 2**22 + 1  # above any pid the kernel gives out
+        returncode = 0
+        waits = 0
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def wait(self):
+            Gone.waits += 1
+            if Gone.waits == 1:
+                raise KeyboardInterrupt
+            return 0
+
+    monkeypatch.setattr(ratchet.subprocess, "Popen", Gone)
+    with pytest.raises(KeyboardInterrupt):
+        ratchet._run("true")  # noqa: SLF001 - the step runner under test
+    assert Gone.waits == 2, "it still waits for the step"

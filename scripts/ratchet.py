@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import json
 import os
 import re
@@ -302,7 +303,9 @@ def _run(
 
     subprocess.run would kill it outright: a rule check would leave a file switched off,
     and the suite its files. The command gets a session of its own, so a terminal's
-    Ctrl-C reaches it only through this run, and once. Its output goes to files, not
+    Ctrl-C reaches it only through this run, and once. A stop goes to its whole process
+    group, as a terminal's Ctrl-C would: the command is usually `uv run ...`, and the
+    program under uv must get the stop whether uv passes it on or not. Its output goes to files, not
     pipes: after a kill -9 of this run, a pipe would end it at its next write.
 
     The wait after that Ctrl-C has no time limit, on purpose: these runs are never cut
@@ -323,8 +326,9 @@ def _run(
         try:
             child.wait()
         except BaseException:
-            # RULE: a stopped measurement lets its child clean up
-            child.send_signal(signal.SIGINT)
+            with contextlib.suppress(ProcessLookupError):
+                # RULE: a stopped measurement stops its step and waits for it
+                os.killpg(child.pid, signal.SIGINT)
             child.wait()
             raise
         out.seek(0)
