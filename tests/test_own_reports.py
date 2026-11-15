@@ -89,26 +89,41 @@ def test_a_missing_private_file_reads_as_none(tmp_path):
     assert read_private(tmp_path / "absent") is None
 
 
-def test_an_open_private_folder_is_closed_to_others(tmp_path, caplog):
-    # The owner's own folder, left open by a umask or by hand, is closed before anything is put in it.
+@pytest.mark.parametrize(
+    "case",
+    [
+        (0o777, False, r"is open to others.*Fix: chmod go-rwx {folder}"),
+        (0o750, False, r"is open to others.*Fix: chmod go-rwx {folder}"),
+        (0o700, True, r"{folder} isn't a folder of yours"),
+    ],
+    ids=["open to all", "open to the group", "someone else's"],
+)
+def test_a_private_file_s_folder_is_the_owner_s_and_closed_to_others(tmp_path, monkeypatch, caplog, case):
+    # An open folder is refused loudly, not quietly closed: the owner should see it was open.
+    mode, theirs, said = case
     folder = tmp_path / "state"
     folder.mkdir()
-    folder.chmod(0o777)
-    write_private(folder / "file", b"words")
-    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    folder.chmod(mode)
+    if theirs:
+        someone_else = os.getuid() + 1
+        monkeypatch.setattr(safe_file.os, "getuid", lambda: someone_else)
+    with pytest.raises(PrivateFileError, match=said.format(folder=folder)):
+        write_private(folder / "file", b"words")
+    monkeypatch.undo()
+    assert list(folder.iterdir()) == []
+    assert stat.S_IMODE(folder.stat().st_mode) == mode, "the folder is left as the owner set it"
     assert str(folder) in caplog.text
     assert "words" not in caplog.text
 
 
-def test_a_private_file_s_folder_is_the_owner_s_and_closed_to_others(tmp_path, monkeypatch):
+def test_an_open_folder_means_the_report_is_not_saved_and_said_so(tmp_path, caplog):
     folder = tmp_path / "state"
-    folder.mkdir(mode=0o700)
-    someone_else = os.getuid() + 1
-    monkeypatch.setattr(safe_file.os, "getuid", lambda: someone_else)
-    with pytest.raises(PrivateFileError, match=rf"{folder} isn't a folder of yours"):
-        write_private(folder / "file", b"words")
-    monkeypatch.undo()
-    assert list(folder.iterdir()) == []
+    folder.mkdir()
+    folder.chmod(0o755)
+    with pytest.raises(SinkRefusedError, match=r"Not saved: your own list can't be written.*chmod go-rwx"):
+        LocalSink(folder, keep=KEEP).take(_report())
+    assert "21.49" not in caplog.text
+    assert "Test Station" not in caplog.text
 
 
 def test_a_private_file_s_folder_that_is_a_link_is_refused(tmp_path):

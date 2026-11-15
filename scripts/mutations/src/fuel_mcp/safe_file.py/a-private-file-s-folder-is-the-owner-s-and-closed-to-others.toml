@@ -1,5 +1,5 @@
 [[rule]]
 name = "a private file's folder is the owner's and closed to others"
 file = "src/fuel_mcp/safe_file.py"
-find = '^\s*if facts\.st_uid != os\.getuid\(\):$'
+find = '^\s*if not mine or stat\.S_IMODE\(facts\.st_mode\) & 0o077:$'
 replace = 'if False:'

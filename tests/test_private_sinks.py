@@ -325,7 +325,7 @@ def test_a_refusing_or_failing_sender_is_said_and_the_report_stays_local(tmp_pat
 
 
 def test_a_local_save_that_fails_sends_nothing(tmp_path):
-    (tmp_path / "state").mkdir()
+    (tmp_path / "state").mkdir(mode=0o700)
     (tmp_path / "state" / "own-reports.jsonl").symlink_to(tmp_path / "elsewhere")
     local = LocalSink(tmp_path / "state", keep=dt.timedelta(hours=12))
     sender = _Recording(local)
