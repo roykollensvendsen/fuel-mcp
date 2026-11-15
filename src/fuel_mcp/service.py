@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from fuel_mcp.geo import distance_km
 from fuel_mcp.model import CREDIT, Fuel, PriceSource, SourceUnavailableError, StationPrice
-from fuel_mcp.speech import spoken_age, spoken_date, spoken_distance, spoken_price
+from fuel_mcp.speech import spoken_age, spoken_date, spoken_distance, spoken_name, spoken_price
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -83,15 +83,17 @@ class FuelService:
         current = [(p, km) for p, km in near if now - p.updated_at <= CURRENT_FOR]
         if not current:
             latest, km = max(near, key=lambda pk: (pk[0].updated_at, -pk[1]))
+            name = spoken_name(latest.name, latest.brand)
             say = (
                 f"No {fuel.spoken.lower()} price within {round(radius_km)} kilometres is from the last week. "
-                f"The latest was at {latest.name}, {spoken_price(latest.price)}, {spoken_distance(km)}, "
+                f"The latest was at {name}, {spoken_price(latest.price)}, {spoken_distance(km)}, "
                 f"last reported {spoken_date(latest.updated_at, now)}."
             )
             return _answer(say, station=_station(latest, km, current=False))
         best, km = min(current, key=lambda pk: (round(pk[0].price, 2), pk[1]))
+        name = spoken_name(best.name, best.brand)
         say = (
-            f"{fuel.spoken} is cheapest at {best.name}, {spoken_price(best.price)}, {spoken_distance(km)}. "
+            f"{fuel.spoken} is cheapest at {name}, {spoken_price(best.price)}, {spoken_distance(km)}. "
             f"{best.source}'s price is {spoken_age(best.updated_at, now)}."
         )
         return _answer(say, station=_station(best, km, current=True))
@@ -101,7 +103,7 @@ def _station(price: StationPrice, km: float, *, current: bool) -> dict[str, Any]
     """The chosen station for a program to read; its coordinates are left out."""
     return {
         "current": current,
-        "name": price.name,
+        "name": spoken_name(price.name, price.brand),
         "brand": price.brand,
         "fuel": price.fuel.value,
         "price": price.price,
