@@ -1,0 +1,5 @@
+[[rule]]
+name = "a slow host never holds a question past its time"
+file = "src/fuel_mcp/sources/drivstoffpriser.py"
+find = '^    worker\.join\(timeout\)$'
+replace = 'worker.join()'
