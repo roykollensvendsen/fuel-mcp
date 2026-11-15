@@ -50,9 +50,11 @@ class Host:
 
     def __init__(self, *, down=False):
         self.requests = []
+        self.timeouts = []
         self.down = down
 
-    def __call__(self, url, headers):
+    def __call__(self, url, headers, timeout=None):
+        self.timeouts.append(timeout)
         self.requests.append((url.rsplit("/", 1)[-1], dict(headers)))
         if self.down:
             msg = "pretend outage"
@@ -150,7 +152,7 @@ def test_when_the_host_is_down_and_there_is_no_copy_the_source_is_unavailable(tm
 
 
 def test_an_export_in_a_changed_format_is_unavailable_not_a_crash(tmp_path):
-    def broken(_url, _headers):
+    def broken(_url, _headers, _timeout=None):
         return Response(200, {}, b'{"stations": "not a list"}')
 
     with pytest.raises(SourceUnavailableError, match="format"):
@@ -177,13 +179,13 @@ def test_the_real_fetch_turns_a_304_into_a_response(monkeypatch):
         raise urllib.error.HTTPError(request.full_url, 304, "Not Modified", {"Date": stamp}, None)
 
     monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", not_modified)
-    assert drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}).status == 304
+    assert drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 3.0).status == 304
     assert seen["agent"] == "fuel-mcp"
 
 
 def test_the_real_fetch_reads_a_body(monkeypatch):
     monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", lambda *_, **__: _Reply(b"{}"))
-    reply = drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {"If-None-Match": '"y"'})
+    reply = drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {"If-None-Match": '"y"'}, 3.0)
     assert (reply.status, reply.body, reply.headers["ETag"]) == (200, b"{}", '"x"')
 
 
@@ -193,18 +195,19 @@ class Flaky(Host):
     def __init__(self):
         super().__init__()
         self.answer = None  # None works; an OSError instance raises it; an int is that status
+        self.answer_headers = {}
 
-    def __call__(self, url, headers):
+    def __call__(self, url, headers, _timeout=None):
         if isinstance(self.answer, OSError):
             self.requests.append((url.rsplit("/", 1)[-1], dict(headers)))
             raise self.answer
         if isinstance(self.answer, int):
             self.requests.append((url.rsplit("/", 1)[-1], dict(headers)))
-            return Response(self.answer, {}, b"")
+            return Response(self.answer, self.answer_headers, b"")
         if isinstance(self.answer, bytes):
             self.requests.append((url.rsplit("/", 1)[-1], dict(headers)))
             return Response(200, {"ETag": '"broken"'}, self.answer)
-        return super().__call__(url, headers)
+        return super().__call__(url, headers, _timeout)
 
 
 def _expired_copy(tmp_path):
@@ -266,8 +269,46 @@ def test_a_bad_export_keeps_the_good_copy(tmp_path):
     assert json.loads((tmp_path / "stations.json").read_bytes()) == STATIONS
 
 
-def test_one_question_waits_for_at_most_one_timeout():
-    assert drivstoffpriser.TIMEOUT_S <= 6  # the voice gives up after about 15 s
+class Stopwatch:
+    """A clock for elapsed time, moved on by the fake host as it answers."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+@pytest.mark.parametrize(("seconds_each", "timeouts", "answered"), [(5, [8.0, 3.0], True), (8, [8.0], False)])
+def test_a_question_waits_on_the_host_for_eight_seconds_in_all(tmp_path, seconds_each, timeouts, answered):
+    watch, host = Stopwatch(), Host()
+
+    def slow(url, headers, timeout=None):
+        watch.t += seconds_each
+        return host(url, headers, timeout)
+
+    source = DrivstoffpriserSource(tmp_path, fetch=slow, now=Clock(), elapsed=watch)
+    if answered:
+        assert len(source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)) == 2
+    else:
+        with pytest.raises(SourceUnavailableError):  # no copy yet, and no time left for the second file
+            source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert host.timeouts == timeouts
+
+
+@pytest.mark.parametrize(
+    ("status", "header", "quiet_minutes"), [(429, {}, 60), (503, {"Retry-After": "7200"}, 120)]
+)
+def test_a_busy_host_is_left_alone_for_an_hour_or_as_long_as_it_asks(tmp_path, status, header, quiet_minutes):
+    source, host, clock = _expired_copy(tmp_path)
+    host.answer, host.answer_headers = status, header
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    clock.now += dt.timedelta(minutes=quiet_minutes - 1)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(host.requests) == 1
+    clock.now += dt.timedelta(minutes=2)
+    source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+    assert len(host.requests) == 2
 
 
 @pytest.mark.parametrize(
