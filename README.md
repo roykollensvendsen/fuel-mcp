@@ -23,11 +23,15 @@ $ uv run fuel-mcp serve --simulate < /dev/null
 
 | Tool | What it does |
 | --- | --- |
-| `fuel_price` | Names the cheapest station within about 5 km, its price, distance and age. It reads only. |
+| `fuel_price` | Names the cheapest station near you, its price, distance and age. It reads only. |
 
 It takes `fuel` (`diesel`, `petrol95` or `petrol98`), and the
 phone's position as `lat`, `lon` and `accuracy_m`. The search widens by the
-position's accuracy, which is taken as 100 m when not given. With no
+position's accuracy, which is taken as 100 m when not given.
+It looks within 5 km first. With no price from the last week there, it
+steps out to 10 km, then 20 km, and says how far it had to look. With none
+from the last week at all, it gives the latest it found and its date. When
+even that is older than 30 days, it starts with "Only an old price". With no
 position, it asks where. A price more than a week old is never said as
 current: it is given with the day it was last reported.
 
@@ -40,6 +44,8 @@ when the voice gives no position, and `fuel` when a question names none:
 ```toml
 sources = ["drivstoffpriser"]   # one source; with none listed, nothing is fetched
 fuel = "petrol95"               # diesel when not set
+farthest_km = 20                # how far the search steps out; 20 when not set
+old_after_days = 30             # older than this is said as only an old price; 30 when not set
 [home]
 lat = 0.0
 lon = 0.0

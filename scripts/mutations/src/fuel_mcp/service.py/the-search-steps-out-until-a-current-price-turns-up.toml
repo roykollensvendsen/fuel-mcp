@@ -1,0 +1,5 @@
+[[rule]]
+name = "the search steps out until a current price turns up"
+file = "src/fuel_mcp/service.py"
+find = '^    for step in steps:$'
+replace = 'for step in steps[:1]:'

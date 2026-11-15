@@ -1,0 +1,5 @@
+[[rule]]
+name = "a search setting that is not a positive number names the fix and the file"
+file = "src/fuel_mcp/settings.py"
+find = '^    if isinstance\(value, bool\) or not isinstance\(value, kinds\) or value <= 0:$'
+replace = 'if False:'

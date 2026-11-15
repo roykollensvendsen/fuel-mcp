@@ -9,7 +9,7 @@ import sys
 
 from fuel_mcp.model import Fuel
 from fuel_mcp.server import build_server, simulated_answer
-from fuel_mcp.service import FuelService
+from fuel_mcp.service import Choices, FuelService
 from fuel_mcp.settings import SettingsError, build_source, cache_folder, config_folder, load_settings
 from fuel_mcp.simulator import FakeSource
 
@@ -28,7 +28,7 @@ def _service(*, simulate: bool) -> FuelService:
         build_source(settings, cache_folder(os.environ)),
         home=settings.home,
         config_file=str(folder / "config.toml"),
-        fuel=settings.fuel,
+        choices=Choices(settings.fuel, settings.farthest_km, settings.old_after_days),
     )
 
 

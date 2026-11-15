@@ -41,7 +41,8 @@ def build_server(service: FuelService, *, simulated: bool = False) -> MCPServer[
         annotations=ToolAnnotations(read_only_hint=True),
         description=(
             "Find the cheapest fuel near a point; changes nothing.\n"
-            "Names the cheapest station within about 5 km, its price, how far it is and how old the "
+            "Names the cheapest station within 5 km, looking further (20 km unless the owner set "
+            "another) when none has a current price. Says its price, how far it is and how old the "
             "price is, in one sentence. Read 'say' aloud."
         ),
     )
