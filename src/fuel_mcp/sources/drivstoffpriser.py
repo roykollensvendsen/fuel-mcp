@@ -15,6 +15,7 @@ import json
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -62,8 +63,10 @@ def urllib_fetch(url: str, headers: Mapping[str, str], timeout: float) -> Respon
 
     A socket timeout covers neither the name lookup nor the whole of a slow read, so the
     GET runs in a thread of its own and is no longer waited for once the time is up. The
-    thread is left to end on its own socket timeout; nothing waits for it.
+    thread is left to end on its own; nothing waits for it. While it lives, the host is not
+    asked again, so a host that hangs on every question holds one thread, never one per question.
     """
+    host = urllib.parse.urlsplit(url).netloc
     outcome: dict[str, Response | BaseException] = {}
 
     def get() -> None:
@@ -72,8 +75,14 @@ def urllib_fetch(url: str, headers: Mapping[str, str], timeout: float) -> Respon
         except BaseException as error:  # noqa: BLE001 - handed to the caller below
             outcome["error"] = error
 
-    worker = threading.Thread(target=get, name="fuel-mcp-fetch", daemon=True)
-    worker.start()
+    worker = threading.Thread(target=get, name=f"fuel-mcp-fetch {host}", daemon=True)
+    with _FLIGHTS_LOCK:
+        # RULE: a hung host is never asked twice at once
+        if in_flight(host):
+            msg = "the price service isn't answering; its last request has not ended"
+            raise TimeoutError(msg)
+        _FLIGHTS[host] = worker
+        worker.start()
     # RULE: a slow host never holds a question past its time
     worker.join(timeout)
     failure = outcome.get("error")
@@ -84,6 +93,17 @@ def urllib_fetch(url: str, headers: Mapping[str, str], timeout: float) -> Respon
         msg = f"the host took more than {timeout:.1f} s"
         raise TimeoutError(msg)
     return reply
+
+
+#: The GET still running for each host, if any: at most one, however long it hangs.
+_FLIGHTS: dict[str, threading.Thread] = {}
+_FLIGHTS_LOCK = threading.Lock()
+
+
+def in_flight(host: str) -> bool:
+    """Whether a GET to `host` is still running, perhaps long after its question was answered."""
+    worker = _FLIGHTS.get(host)
+    return worker is not None and worker.is_alive()
 
 
 def _get(url: str, headers: Mapping[str, str], timeout: float) -> Response:

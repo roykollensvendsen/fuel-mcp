@@ -329,6 +329,14 @@ def test_a_price_time_with_no_offset_is_read_as_norwegian_time(stamp, utc_hour):
     assert found[0].updated_at.astimezone(dt.UTC).hour == utc_hour
 
 
+def _settle(host):
+    """Wait for a released GET's thread to end, so the next test finds the host free."""
+    deadline = time.monotonic() + 3
+    while drivstoffpriser.in_flight(host) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not drivstoffpriser.in_flight(host)
+
+
 def test_a_slow_host_never_holds_a_question_past_its_time(monkeypatch):
     """A name lookup or a read that hangs is not covered by a socket timeout, so the wait is cut off."""
     released = threading.Event()
@@ -343,6 +351,7 @@ def test_a_slow_host_never_holds_a_question_past_its_time(monkeypatch):
         drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 0.2)
     assert time.monotonic() - started < 1.5
     released.set()
+    _settle("example.invalid")
 
 
 def test_a_failure_inside_the_fetch_reaches_the_question(monkeypatch):
@@ -353,3 +362,23 @@ def test_a_failure_inside_the_fetch_reaches_the_question(monkeypatch):
     monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", refused)
     with pytest.raises(urllib.error.URLError, match="refused"):
         drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 3.0)
+
+
+def test_a_hung_host_is_never_asked_twice_at_once(monkeypatch):
+    """A GET that hangs keeps its thread; another to that host is refused at once, so none pile up."""
+    released = threading.Event()
+
+    def hangs(*_, **__):
+        released.wait(5)
+        return _Reply(b"{}")
+
+    monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", hangs)
+    with pytest.raises(TimeoutError):
+        drivstoffpriser.urllib_fetch("https://example.invalid/stations.json", {}, 0.2)
+    started = time.monotonic()
+    with pytest.raises(OSError, match="the price service isn't answering"):
+        drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 3.0)
+    assert time.monotonic() - started < 0.5
+    released.set()
+    _settle("example.invalid")
+    assert drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 3.0).status == 200
