@@ -68,6 +68,7 @@ def defined_test_names() -> set[str]:
 def test_every_rule_in_the_source_has_a_row_in_the_mutation_table():
     """Without this the evidence falls behind the code and nobody sees it happen."""
     marked, rowed = marked_rules(), rowed_rules()
+    assert marked, "no rules found in the code; the scan is looking in the wrong place"
     assert marked - rowed == set(), f"marked in the source and never switched off: {marked - rowed}"
     assert rowed - marked == set(), f"a row for a rule no longer in the source: {rowed - marked}"
 
