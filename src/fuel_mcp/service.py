@@ -19,8 +19,13 @@ from fuel_mcp.speech import spoken_age, spoken_date, spoken_distance, spoken_nam
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-#: How far a reading searches around the point, before the position's own accuracy is added.
+#: How far a reading searches first, before the position's own accuracy is added. With no
+#: current price there, it steps out, doubling each time, up to the farthest the owner set.
 SEARCH_KM = 5.0
+#: How far the search steps out at most, unless the owner sets farthest_km.
+FARTHEST_KM = 20.0
+#: How old the latest price may be before it is said as only an old price, unless set.
+OLD_AFTER = dt.timedelta(days=30)
 #: The accuracy assumed when the voice gives none; the phone's precise mode reports about this.
 DEFAULT_ACCURACY_M = 100.0
 #: The most a poor position may widen the search. A network fix 50 km out would otherwise search 55 km.
@@ -44,6 +49,15 @@ Answer = dict[str, Any]
 log = logging.getLogger("fuel_mcp")
 
 
+@dataclasses.dataclass(frozen=True)
+class Choices:
+    """The owner's choices: the usual fuel, how far the search steps out, and when a price is old."""
+
+    fuel: Fuel = Fuel.DIESEL
+    farthest_km: float = FARTHEST_KM
+    old_after_days: int = OLD_AFTER.days
+
+
 class FuelService:
     """Reads prices from one source and answers in one sentence."""
 
@@ -54,13 +68,16 @@ class FuelService:
         now: Callable[[], dt.datetime] | None = None,
         home: tuple[float, float] | None = None,
         config_file: str = CONFIG_FILE,
-        fuel: Fuel = Fuel.DIESEL,
+        choices: Choices | None = None,
     ) -> None:
-        """`home` is used when the voice gives no position, and `fuel` when it names none.
+        """`home` is used when the voice gives no position, and the chosen fuel when it names none.
 
         No `source` means none is switched on.
         """
-        self._fuel = fuel
+        choices = choices or Choices()
+        self._fuel = choices.fuel
+        self._farthest_km = choices.farthest_km
+        self._old_after = dt.timedelta(days=choices.old_after_days)
         self._source = source
         self._now = now or (lambda: dt.datetime.now(dt.UTC))
         self._home = home
@@ -89,7 +106,8 @@ class FuelService:
         # RULE: a rough position widens the search by two kilometres at most
         widen_m = min(max(accuracy, 0.0), WIDEST_ACCURACY_M)
         rough = "Your position is rough. " if accuracy > WIDEST_ACCURACY_M else ""
-        radius_km = SEARCH_KM + widen_m / 1000
+        steps = search_steps(self._farthest_km, widen_m / 1000)
+        radius_km = steps[-1]
         try:
             prices = self._source.prices_near(point[0], point[1], radius_km, fuel)
         except SourceUnavailableError as error:
@@ -112,22 +130,66 @@ class FuelService:
         near = [(dataclasses.replace(p, updated_at=min(p.updated_at, now)), km) for p, km in near]
         # RULE: a fuel price older than 7 days is never said as current
         current = [(p, km) for p, km in near if now - p.updated_at <= CURRENT_FOR]
-        if not current:
+        found = _first_step(current, steps)
+        if found is None:
             latest, km = max(near, key=lambda pk: (pk[0].updated_at, -pk[1]))
-            name = spoken_name(latest.name, latest.brand)
-            say = (
-                f"No {fuel.spoken.lower()} price within {round(radius_km)} kilometres is from the last week. "
-                f"The latest was at {name}, {spoken_price(latest.price)}, {spoken_distance(km)}, "
-                f"last reported {spoken_date(latest.updated_at, now)}."
-            )
+            say = self._only_old(fuel, latest, km, radius_km, now)
             return _answer(rough + say, station=_station(latest, km, current=False))
-        best, km = min(current, key=lambda pk: (round(pk[0].price, 2), pk[1]))
+        widened, in_step = found
+        best, km = min(in_step, key=lambda pk: (round(pk[0].price, 2), pk[1]))
         name = spoken_name(best.name, best.brand)
         say = (
-            f"{fuel.spoken} is cheapest at {name}, {spoken_price(best.price)}, {spoken_distance(km)}. "
+            widened
+            + f"{fuel.spoken} is cheapest at {name}, {spoken_price(best.price)}, {spoken_distance(km)}. "
             f"{best.source}'s price is {spoken_age(best.updated_at, now)}."
         )
         return _answer(rough + say, station=_station(best, km, current=True))
+
+    def _only_old(
+        self, fuel: Fuel, latest: StationPrice, km: float, radius_km: float, now: dt.datetime
+    ) -> str:
+        """The sentence for when no price within `radius_km` is from the last week."""
+        name = spoken_name(latest.name, latest.brand)
+        fuel_word, within = fuel.spoken.lower(), f"within {round(radius_km)} kilometres"
+        # RULE: a price older than the old limit is said as only an old price
+        if now - latest.updated_at > self._old_after:
+            opening = (
+                f"Only an old price: no {fuel_word} price {within} in the last {self._old_after.days} days. "
+            )
+        else:
+            opening = f"No {fuel_word} price {within} is from the last week. "
+        return (
+            opening + f"The latest was at {name}, {spoken_price(latest.price)}, {spoken_distance(km)}, "
+            f"last reported {spoken_date(latest.updated_at, now)}."
+        )
+
+
+def search_steps(farthest_km: float, widen_km: float = 0.0) -> list[float]:
+    """The distances searched in turn: 5 km, doubling, and last the farthest the owner set.
+
+    Each is widened by `widen_km`, for a position that is not exact.
+    """
+    steps, step = [], SEARCH_KM
+    while step < farthest_km:
+        steps.append(step)
+        step *= 2
+    # RULE: the search never goes past the farthest distance set
+    steps.append(farthest_km)
+    return [s + widen_km for s in steps]
+
+
+def _first_step(
+    current: list[tuple[StationPrice, float]], steps: list[float]
+) -> tuple[str, list[tuple[StationPrice, float]]] | None:
+    """The current prices in the first step that has any, said with how far it had to look."""
+    passed = ""
+    # RULE: the search steps out until a current price turns up
+    for step in steps:
+        in_step = [(p, km) for p, km in current if km <= step]
+        if in_step:
+            return passed, in_step
+        passed = f"Nothing within {round(step)} kilometres. "
+    return None
 
 
 def _station(price: StationPrice, km: float, *, current: bool) -> dict[str, Any]:

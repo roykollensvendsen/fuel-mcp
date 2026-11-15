@@ -1,0 +1,5 @@
+[[rule]]
+name = "the search never goes past the farthest distance set"
+file = "src/fuel_mcp/service.py"
+find = '^    steps\.append\(farthest_km\)$'
+replace = 'steps.append(farthest_km + SEARCH_KM)'

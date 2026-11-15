@@ -6,6 +6,8 @@ They live in ``$XDG_CONFIG_HOME/fuel-mcp/config.toml``, normally
 
     sources = ["drivstoffpriser"]   # none is on until it is listed here
     fuel = "petrol95"               # when a question names none; diesel if not set
+    farthest_km = 20                # how far the search steps out at most; 20 if not set
+    old_after_days = 30             # a latest price older than this is said as only an old price
     [home]                          # used when the voice gives no position
     lat = 0.0
     lon = 0.0
@@ -45,6 +47,8 @@ class Settings:
     home: tuple[float, float] | None = field(default=None, repr=False)
     sources: tuple[str, ...] = DEFAULT_SOURCES
     fuel: Fuel = Fuel.DIESEL
+    farthest_km: float = 20.0
+    old_after_days: int = 30
 
 
 def _folder(env: Mapping[str, str], variable: str, fallback: str) -> pathlib.Path:
@@ -89,7 +93,27 @@ def load_settings(folder: pathlib.Path) -> Settings:
             f"Fix sources in {path}"
         )
         raise SettingsError(msg)
-    return Settings(home=_home(table.get("home"), path), sources=tuple(sources), fuel=_fuel(table, path))
+    return Settings(
+        home=_home(table.get("home"), path),
+        sources=tuple(sources),
+        fuel=_fuel(table, path),
+        farthest_km=float(_positive(table, "farthest_km", 20.0, path, whole=False)),
+        old_after_days=int(_positive(table, "old_after_days", 30, path, whole=True)),
+    )
+
+
+def _positive(
+    table: Mapping[str, object], key: str, default: float, path: pathlib.Path, *, whole: bool
+) -> float:
+    """The number set for `key`, or `default`; anything but a positive number names the fix."""
+    value = table.get(key, default)
+    kinds = (int,) if whole else (int, float)
+    # RULE: a search setting that is not a positive number names the fix and the file
+    if isinstance(value, bool) or not isinstance(value, kinds) or value <= 0:
+        kind = "a whole number" if whole else "a number"
+        msg = f"{key} must be {kind} above 0, such as {key} = {default:g}. Fix {key} in {path}"
+        raise SettingsError(msg)
+    return value
 
 
 def _fuel(table: Mapping[str, object], path: pathlib.Path) -> Fuel:

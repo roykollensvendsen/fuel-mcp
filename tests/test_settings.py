@@ -175,3 +175,28 @@ def test_the_owners_default_fuel_reaches_the_answer(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(cli, "build_source", lambda _s, _c: FakeSource(now=NOW))
     assert cli.main(["price", "--lat", "0", "--lon", "0"]) == 0
     assert capsys.readouterr().out.startswith("Petrol 98 is cheapest")
+
+
+def test_the_farthest_search_and_the_old_price_limit_are_read_from_the_config(tmp_path):
+    defaults = load_settings(tmp_path / "absent")
+    assert (defaults.farthest_km, defaults.old_after_days) == (20.0, 30)
+    folder = _config(tmp_path, "farthest_km = 35\nold_after_days = 60\n")
+    chosen = load_settings(folder)
+    assert (chosen.farthest_km, chosen.old_after_days) == (35.0, 60)
+
+
+@pytest.mark.parametrize(
+    ("line", "key"),
+    [
+        ("farthest_km = 0", "farthest_km"),
+        ('farthest_km = "far"', "farthest_km"),
+        ("farthest_km = true", "farthest_km"),
+        ("old_after_days = -1", "old_after_days"),
+        ("old_after_days = 2.5", "old_after_days"),
+    ],
+)
+def test_a_search_setting_that_is_not_a_positive_number_names_the_fix_and_the_file(tmp_path, line, key):
+    with pytest.raises(SettingsError, match=rf"{key} must be a whole number|{key} must be a number"):
+        load_settings(_config(tmp_path, line + "\n"))
+    with pytest.raises(SettingsError, match=rf"Fix {key} in .*config\.toml"):
+        load_settings(_config(tmp_path, line + "\n"))

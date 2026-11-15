@@ -1,0 +1,5 @@
+[[rule]]
+name = "a price older than the old limit is said as only an old price"
+file = "src/fuel_mcp/service.py"
+find = '^        if now - latest\.updated_at > self\._old_after:$'
+replace = 'if False:'

@@ -6,7 +6,7 @@ import datetime as dt
 
 from fuel_mcp.model import CREDIT, Fuel
 from fuel_mcp.server import build_server
-from fuel_mcp.service import FuelService
+from fuel_mcp.service import Choices, FuelService
 from fuel_mcp.simulator import FakeSource
 
 NOW = dt.datetime(2030, 1, 1, 12, 0, tzinfo=dt.UTC)
@@ -36,7 +36,7 @@ def test_diesel_is_the_fuel_when_none_is_named():
 
 
 def test_the_owner_s_usual_fuel_is_used_when_none_is_named():
-    service = FuelService(FakeSource(now=NOW), now=lambda: NOW, fuel=Fuel.PETROL95)
+    service = FuelService(FakeSource(now=NOW), now=lambda: NOW, choices=Choices(fuel=Fuel.PETROL95))
     answer = _call(build_server(service), "fuel_price", lat=0.0, lon=0.0)
     assert answer["say"].startswith("Petrol 95 is cheapest")
     named = _call(build_server(service), "fuel_price", fuel="diesel", lat=0.0, lon=0.0)
