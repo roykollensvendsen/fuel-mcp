@@ -63,8 +63,9 @@ def urllib_fetch(url: str, headers: Mapping[str, str], timeout: float) -> Respon
 
     A socket timeout covers neither the name lookup nor the whole of a slow read, so the
     GET runs in a thread of its own and is no longer waited for once the time is up. The
-    thread is left to end on its own; nothing waits for it. While it lives, the host is not
-    asked again, so a host that hangs on every question holds one thread, never one per question.
+    thread is left to end on its own; nothing waits for it. While a GET given up on that way
+    still runs, the host is not asked again, so a host that hangs on every question holds one
+    thread, never one per question. GETs still within their time run side by side.
     """
     host = urllib.parse.urlsplit(url).netloc
     outcome: dict[str, Response | BaseException] = {}
@@ -76,15 +77,17 @@ def urllib_fetch(url: str, headers: Mapping[str, str], timeout: float) -> Respon
             outcome["error"] = error
 
     worker = threading.Thread(target=get, name=f"fuel-mcp-fetch {host}", daemon=True)
-    with _FLIGHTS_LOCK:
+    with _ABANDONED_LOCK:
         # RULE: a hung host is never asked twice at once
-        if in_flight(host):
-            msg = "the price service isn't answering; its last request has not ended"
+        if still_hung(host):
+            msg = "the price service hasn't answered its last request; try again in a minute"
             raise TimeoutError(msg)
-        _FLIGHTS[host] = worker
-        worker.start()
+    worker.start()
     # RULE: a slow host never holds a question past its time
     worker.join(timeout)
+    if worker.is_alive():
+        with _ABANDONED_LOCK:
+            _ABANDONED[host] = worker
     failure = outcome.get("error")
     if isinstance(failure, BaseException):
         raise failure
@@ -95,14 +98,15 @@ def urllib_fetch(url: str, headers: Mapping[str, str], timeout: float) -> Respon
     return reply
 
 
-#: The GET still running for each host, if any: at most one, however long it hangs.
-_FLIGHTS: dict[str, threading.Thread] = {}
-_FLIGHTS_LOCK = threading.Lock()
+#: For each host, the last GET its caller gave up waiting for. Threads to a host are
+#: process-wide, so this is too; it holds no prices, only threads.
+_ABANDONED: dict[str, threading.Thread] = {}
+_ABANDONED_LOCK = threading.Lock()
 
 
-def in_flight(host: str) -> bool:
-    """Whether a GET to `host` is still running, perhaps long after its question was answered."""
-    worker = _FLIGHTS.get(host)
+def still_hung(host: str) -> bool:
+    """Whether a GET to `host` that its caller gave up on is still running."""
+    worker = _ABANDONED.get(host)
     return worker is not None and worker.is_alive()
 
 

@@ -329,12 +329,20 @@ def test_a_price_time_with_no_offset_is_read_as_norwegian_time(stamp, utc_hour):
     assert found[0].updated_at.astimezone(dt.UTC).hour == utc_hour
 
 
+@pytest.fixture(autouse=True)
+def _no_hung_hosts():
+    """Each test starts with no host marked as hung, whatever the one before left."""
+    drivstoffpriser._ABANDONED.clear()  # noqa: SLF001 - module state, cleared for each test
+    yield
+    drivstoffpriser._ABANDONED.clear()  # noqa: SLF001
+
+
 def _settle(host):
     """Wait for a released GET's thread to end, so the next test finds the host free."""
     deadline = time.monotonic() + 3
-    while drivstoffpriser.in_flight(host) and time.monotonic() < deadline:
+    while drivstoffpriser.still_hung(host) and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert not drivstoffpriser.in_flight(host)
+    assert not drivstoffpriser.still_hung(host)
 
 
 def test_a_slow_host_never_holds_a_question_past_its_time(monkeypatch):
@@ -376,9 +384,30 @@ def test_a_hung_host_is_never_asked_twice_at_once(monkeypatch):
     with pytest.raises(TimeoutError):
         drivstoffpriser.urllib_fetch("https://example.invalid/stations.json", {}, 0.2)
     started = time.monotonic()
-    with pytest.raises(OSError, match="the price service isn't answering"):
+    with pytest.raises(OSError, match="hasn't answered its last request; try again in a minute"):
         drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 3.0)
     assert time.monotonic() - started < 0.5
     released.set()
     _settle("example.invalid")
     assert drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 3.0).status == 200
+
+
+def test_two_questions_at_once_to_a_healthy_host_both_get_their_answer(monkeypatch):
+    """Only a request given up on blocks the host; one still within its time does not."""
+
+    def answers(*_, **__):
+        time.sleep(0.1)
+        return _Reply(b"{}")
+
+    monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", answers)
+    replies = []
+
+    def ask():
+        replies.append(drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 3.0).status)
+
+    askers = [threading.Thread(target=ask) for _ in range(2)]
+    for asker in askers:
+        asker.start()
+    for asker in askers:
+        asker.join(5)
+    assert replies == [200, 200]

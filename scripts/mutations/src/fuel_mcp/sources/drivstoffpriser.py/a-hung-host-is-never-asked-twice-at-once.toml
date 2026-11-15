@@ -1,5 +1,5 @@
 [[rule]]
 name = "a hung host is never asked twice at once"
 file = "src/fuel_mcp/sources/drivstoffpriser.py"
-find = '^        if in_flight\(host\):$'
+find = '^        if still_hung\(host\):$'
 replace = 'if False:'
