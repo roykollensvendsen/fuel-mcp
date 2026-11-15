@@ -39,14 +39,16 @@ class Sender:
 
     needs_yes = True
 
-    def __init__(self, label, *, refuse=False, slow_s=0.0):
+    def __init__(self, label, *, refuse=False, slow_s=0.0, held=None):
         self.label = label
         self.taken: list[OwnReport] = []
-        self._refuse, self._slow_s = refuse, slow_s
+        self._refuse, self._slow_s, self._held = refuse, slow_s, held
 
     def take(self, report):
         if self._slow_s:
             time.sleep(self._slow_s)
+        if self._held is not None:
+            self._held.wait()  # until the test lets go: a sender that hasn't answered yet
         if self._refuse:
             msg = "you've reported there 5 times today"
             raise SinkRefusedError(msg)
@@ -260,6 +262,125 @@ def test_a_send_past_its_time_limit_is_said_as_may_have_been_sent(tmp_path):
     for worker in threading.enumerate():  # let the slow sender end, so no thread outlives the test
         if worker.name.startswith("fuel-mcp-send"):
             worker.join()
+
+
+def _let_the_senders_end(held):
+    held.set()
+    for worker in threading.enumerate():
+        if worker.name.startswith("fuel-mcp-send"):
+            worker.join()
+
+
+def test_all_sends_share_one_deadline(tmp_path):
+    held = threading.Event()
+    labels = ["Service North", "Service Other", "Service Elsewhere"]
+    private = [Sender("Service Fast"), *(Sender(label, held=held) for label in labels)]
+    reporter, _ = _reporter(tmp_path, Clock(), private=private, send_timeout_s=0.25)
+    token = reporter.report(21.49, lat=0.0, lon=0.0, accuracy_m=10)["token"]
+    started = time.monotonic()
+    try:
+        answer = reporter.confirm(token)
+        took = time.monotonic() - started
+    finally:
+        _let_the_senders_end(held)
+    assert took < 0.5, f"three silent senders took {took:.2f} s, not one deadline of 0.25 s"
+    assert answer["say"] == "Sent to Service Fast. " + " ".join(
+        f"It may have been sent to {label}: it didn't answer in time." for label in labels
+    )
+
+
+class _Guarded(dict):
+    """A dict that notes every use made while the reporter's lock isn't held."""
+
+    def __init__(self, held, unguarded):
+        super().__init__()
+        self._held, self._unguarded = held, unguarded
+
+    def _check(self, use):
+        if not self._held():
+            self._unguarded.append(f"{use} in {threading.current_thread().name}")
+
+
+for _use in (
+    "__setitem__",
+    "__getitem__",
+    "__delitem__",
+    "__contains__",
+    "pop",
+    "setdefault",
+    "get",
+    "items",
+):
+
+    def _checked(self, *args, _use=_use, **kwargs):
+        self._check(_use)
+        return getattr(dict, _use)(self, *args, **kwargs)
+
+    setattr(_Guarded, _use, _checked)
+
+
+def test_the_questions_and_sends_are_changed_only_under_one_lock(tmp_path):
+    held = threading.Event()
+    silent = Sender("Service Other", held=held)
+    reporter, _ = _reporter(tmp_path, Clock(), private=[Sender("Service North"), silent], send_timeout_s=0.1)
+
+    def locked():
+        lock = getattr(reporter, "_lock", None)
+        return lock is not None and lock.locked()
+
+    unguarded: list[str] = []
+    guarded = _Guarded(locked, unguarded), _Guarded(locked, unguarded)
+    reporter._asked, reporter._sent = guarded  # noqa: SLF001 - what is touched outside the lock is the point
+    try:
+        token = reporter.report(21.49, lat=0.0, lon=0.0, accuracy_m=10)["token"]
+        reporter.confirm(token, only=["Service Nowhere"])  # refused: the token is put back
+        said = reporter.confirm(token)["say"]  # one sent, from its thread; one past the deadline
+        reporter.report(21.59, lat=0.0, lon=0.0, accuracy_m=10)
+        reporter.undo()
+    finally:
+        _let_the_senders_end(held)
+    assert said.startswith("Sent to Service North. It may have been sent to Service Other")
+    assert unguarded == []
+
+
+class _SlowList(LocalSink):
+    """The own list, slow between reading the file and writing it back, as a busy disk might be."""
+
+    def _kept(self, now):
+        kept = super()._kept(now)
+        time.sleep(0.05)
+        return kept
+
+
+def test_report_undo_and_confirm_run_one_at_a_time(tmp_path):
+    local = _SlowList(tmp_path / "state", keep=KEEP)
+    reporter = Reporter(FakeSource(now=NOW), Sinks(local, []), now=Clock())
+    prices = [21.11, 21.22, 21.33, 21.44, 21.55]
+    start = threading.Barrier(len(prices))
+
+    def report(price):
+        start.wait()
+        reporter.report(price, lat=0.0, lon=0.0, accuracy_m=10)
+
+    workers = [threading.Thread(target=report, args=(price,)) for price in prices]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert sorted(r.price for r in local.recent(Fuel.DIESEL, NOW)) == prices  # none lost
+
+
+def test_a_sent_record_is_kept_only_as_long_as_undo_can_use_it(tmp_path):
+    clock = Clock()
+    reporter, _ = _reporter(tmp_path, clock, private=[Sender("Service North")])
+    reporter.confirm(reporter.report(21.49, lat=0.0, lon=0.0, accuracy_m=10)["token"])
+    first = reporter._sent.copy()  # noqa: SLF001 - what is kept is the point
+    clock.pass_(minutes=11)
+    reporter.confirm(reporter.report(21.59, lat=0.0, lon=0.0, accuracy_m=10)["token"])
+    kept = reporter._sent  # noqa: SLF001 - what is kept is the point
+    assert len(first) == 1
+    assert len(kept) == 1
+    assert not set(first) & set(kept)
 
 
 def test_undo_says_what_was_already_sent(tmp_path):
