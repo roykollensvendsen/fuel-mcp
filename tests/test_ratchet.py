@@ -359,3 +359,30 @@ def test_a_measurement_measures_only_this_checkout_s_package(monkeypatch):
     assert f"uv sync in {ratchet.ROOT}" in said
     assert asked == [asked[0]], "nothing is measured once the package is found elsewhere"
     assert asked[0][:3] == ("uv", "run", "python")
+
+
+def test_the_base_is_fetched_by_its_sha_whatever_the_user_s_git_says(tmp_path, monkeypatch):
+    """With protocol 0 set, git refuses a sha that no branch points at, unless the fetch says otherwise."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    settings = tmp_path / "gitconfig"
+    settings.write_text("[protocol]\n\tversion = 0\n[uploadpack]\n\tallowAnySHA1InWant = false\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(settings))
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+    for args in (
+        ["init", "-q", "-b", "main"],
+        ["config", "user.email", "t@example.org"],
+        ["config", "user.name", "t"],
+    ):
+        git(*args)
+    for text in ("the base\n", "after it\n"):
+        (repo / "notes.txt").write_text(text)
+        git("add", "notes.txt")
+        git("commit", "-q", "-m", text.strip())
+    monkeypatch.setattr(ratchet, "ROOT", repo)
+    copy = tmp_path / "base"
+    ratchet.copy_of("main~1", copy)  # a commit no branch points at
+    assert (copy / "notes.txt").read_text() == "the base\n"
