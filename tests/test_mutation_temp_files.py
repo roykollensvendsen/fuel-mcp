@@ -9,6 +9,7 @@ whatever a killed run left is swept away at the next start.
 """
 
 import importlib.util
+import json
 import os
 import pathlib
 import signal
@@ -256,3 +257,48 @@ def test_a_link_at_the_run_s_folder_is_never_followed(tmp_path, monkeypatch):
     mutate.MUTATE_TMP.symlink_to(elsewhere)
     assert str(mutate.MUTATE_TMP) in _refused(mutate.sweep)
     assert (elsewhere / "kept").exists()
+
+
+HOLDS_THE_CHECKOUT = """
+import fcntl, os, sys
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)
+fcntl.flock(fd, fcntl.LOCK_EX)
+print("holding", flush=True)
+sys.stdin.read()
+"""
+
+
+def test_one_mutation_run_per_checkout(tmp_path, monkeypatch):
+    """Two runs of one checkout would mutate the same files, and sweep each other's folders."""
+    mutate = _whole_run(tmp_path, monkeypatch)
+    with subprocess.Popen(
+        [sys.executable, "-c", HOLDS_THE_CHECKOUT, str(mutate.ROOT)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as other:
+        assert other.stdout.readline().strip() == "holding"
+        said = _refused(mutate.main)
+        other.stdin.close()
+    assert "already running" in said
+    assert (mutate.ROOT / "rule.py").read_text() == "x = 1\n"
+    assert not mutate.RECOVERY.exists()
+
+
+def test_a_repair_only_run_puts_back_a_killed_run_s_file_and_does_nothing_else(tmp_path, monkeypatch):
+    mutate = _whole_run(tmp_path, monkeypatch)
+    (mutate.ROOT / "rule.py").write_text("x = 2\n")  # a killed run left it mutated
+    mutate.RECOVERY.write_text(json.dumps({"file": "rule.py", "original": "x = 1\n", "mutated": "x = 2\n"}))
+    left = mutate.MUTATE_TMP / "run-left"
+    left.mkdir(parents=True)
+
+    def no_suite():
+        msg = "a repair-only run ran the suite"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(mutate, "run_suite", no_suite)
+    monkeypatch.setattr(mutate.sys, "argv", ["mutate.py", "--repair-only"])
+    assert mutate.main() == 0
+    assert (mutate.ROOT / "rule.py").read_text() == "x = 1\n"
+    assert not mutate.RECOVERY.exists()
+    assert left.exists(), "nothing else: not even the sweep"
