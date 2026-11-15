@@ -70,6 +70,8 @@ def test_a_mutation_run_leaves_the_temporary_folder_empty(tmp_path, monkeypatch)
     monkeypatch.setattr(mutate, "ROWS", project / "scripts/mutations")
     monkeypatch.setattr(mutate, "RECOVERY", project / "scripts/.mutate-recovery.json")
     monkeypatch.setattr(sys, "argv", ["mutate.py"])
+    # A scratch project has no package of its own; the check has a test of its own.
+    monkeypatch.setattr(mutate, "package_from_here", lambda: None)
     assert mutate.main() == 0
     assert list(temp.iterdir()) == []
 
@@ -91,6 +93,7 @@ mutate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mutate)
 mutate.ROOT, mutate.ROWS = project, project / "scripts/mutations"
 mutate.RECOVERY = project / "scripts/.mutate-recovery.json"
+mutate.package_from_here = lambda: None  # a scratch project has no package of its own
 sys.argv = ["mutate.py"]
 sys.exit(mutate.main())
 """
@@ -191,6 +194,8 @@ def test_measuring_the_tree_leaves_nothing_in_the_temporary_folder(tmp_path, mon
             stdout = "\n1/1 rules turned off the test that names them\n"
         if "ruff" in command:
             stdout = "[]"
+        if "-c" in command:  # where the package comes from: this checkout
+            stdout = str(ratchet.PACKAGE / "__init__.py")
         return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(ratchet, "_run", run)
