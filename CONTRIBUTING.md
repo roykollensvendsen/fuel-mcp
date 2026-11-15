@@ -26,6 +26,7 @@ because they are the same lines:
 uv run ruff check . && uv run ruff format --check .
 uv run mypy src
 uv run pytest -q --cov
+uv run python scripts/mutate.py
 committed --no-merge-commit origin/main..HEAD
 ```
 
