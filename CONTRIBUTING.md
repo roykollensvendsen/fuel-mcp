@@ -13,6 +13,11 @@ cd fuel-mcp
 uv sync --all-extras
 ```
 
+Turn on the commit hooks with `git config core.hooksPath .githooks`. One of
+them refuses a commit naming your home or a station near it. It reads those
+from `~/.config/fuel-mcp/config.toml` and from `private.toml` there, which holds
+`words = ["..."]`. Both stay outside the repository.
+
 The commit linter is a separate binary,
 [committed](https://github.com/crate-ci/committed).
 
@@ -27,6 +32,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy src
 uv run pytest -q --cov
 uv run python scripts/mutate.py
+uv run python scripts/private_data_scan.py --history
 committed --no-merge-commit origin/main..HEAD
 ```
 
