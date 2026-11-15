@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The owner's local settings: home, and which price sources are switched on.
+"""The owner's local settings: home, the usual fuel, and which price sources are switched on.
 
 They live in ``$XDG_CONFIG_HOME/fuel-mcp/config.toml``, normally
 ``~/.config/fuel-mcp/config.toml``, and never in the repository:
 
     sources = ["drivstoffpriser"]   # none is on until it is listed here
+    fuel = "petrol95"               # when a question names none; diesel if not set
     [home]                          # used when the voice gives no position
     lat = 0.0
     lon = 0.0
@@ -19,6 +20,8 @@ import pathlib
 import tomllib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from fuel_mcp.model import Fuel
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -37,10 +40,11 @@ class SettingsError(Exception):
 
 @dataclass(frozen=True)
 class Settings:
-    """Where home is, and which sources to ask. Home never appears in a repr."""
+    """Where home is, the usual fuel, and which sources to ask. Home never appears in a repr."""
 
     home: tuple[float, float] | None = field(default=None, repr=False)
     sources: tuple[str, ...] = DEFAULT_SOURCES
+    fuel: Fuel = Fuel.DIESEL
 
 
 def _folder(env: Mapping[str, str], variable: str, fallback: str) -> pathlib.Path:
@@ -85,7 +89,17 @@ def load_settings(folder: pathlib.Path) -> Settings:
             f"Fix sources in {path}"
         )
         raise SettingsError(msg)
-    return Settings(home=_home(table.get("home"), path), sources=tuple(sources))
+    return Settings(home=_home(table.get("home"), path), sources=tuple(sources), fuel=_fuel(table, path))
+
+
+def _fuel(table: Mapping[str, object], path: pathlib.Path) -> Fuel:
+    """The fuel a question means when it names none; diesel unless the owner chose another."""
+    chosen = table.get("fuel", Fuel.DIESEL.value)
+    known = [f.value for f in Fuel]
+    if chosen not in known:
+        msg = f"unknown fuel {chosen!r}; the known ones are {', '.join(known)}. Fix fuel in {path}"
+        raise SettingsError(msg)
+    return Fuel(chosen)
 
 
 def _home(home: object, path: pathlib.Path) -> tuple[float, float] | None:

@@ -54,21 +54,31 @@ class FuelService:
         now: Callable[[], dt.datetime] | None = None,
         home: tuple[float, float] | None = None,
         config_file: str = CONFIG_FILE,
+        fuel: Fuel = Fuel.DIESEL,
     ) -> None:
-        """`home` is used when the voice gives no position; no `source` means none is switched on."""
+        """`home` is used when the voice gives no position, and `fuel` when it names none.
+
+        No `source` means none is switched on.
+        """
+        self._fuel = fuel
         self._source = source
         self._now = now or (lambda: dt.datetime.now(dt.UTC))
         self._home = home
         self._config_file = config_file
 
+    def _chosen(self, fuel: Fuel | None) -> Fuel:
+        """The fuel named, or the owner's usual one when none is."""
+        return fuel or self._fuel
+
     def price(
         self,
-        fuel: Fuel = Fuel.DIESEL,
+        fuel: Fuel | None = None,
         lat: float | None = None,
         lon: float | None = None,
         accuracy_m: float | None = None,
     ) -> Answer:
         """The cheapest `fuel` near the point, or near home, as an answer to read aloud."""
+        fuel = self._chosen(fuel)
         if self._source is None:
             return _answer(NO_SOURCE.format(file=self._config_file))
         point = (lat, lon) if lat is not None and lon is not None else self._home

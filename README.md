@@ -25,7 +25,7 @@ $ uv run fuel-mcp serve --simulate < /dev/null
 | --- | --- |
 | `fuel_price` | Names the cheapest station within about 5 km, its price, distance and age. It reads only. |
 
-It takes `fuel` (`diesel`, the default, `petrol95` or `petrol98`), and the
+It takes `fuel` (`diesel`, `petrol95` or `petrol98`), and the
 phone's position as `lat`, `lon` and `accuracy_m`. The search widens by the
 position's accuracy, which is taken as 100 m when not given. With no
 position, it asks where. A price more than a week old is never said as
@@ -35,10 +35,11 @@ current: it is given with the day it was last reported.
 
 No price source is on until you list one. Settings live in
 `~/.config/fuel-mcp/config.toml`, never in this repository. Home is used
-when the voice gives no position:
+when the voice gives no position, and `fuel` when a question names none:
 
 ```toml
 sources = ["drivstoffpriser"]   # one source; with none listed, nothing is fetched
+fuel = "petrol95"               # diesel when not set
 [home]
 lat = 0.0
 lon = 0.0
