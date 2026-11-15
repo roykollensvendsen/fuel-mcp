@@ -1,0 +1,5 @@
+[[rule]]
+name = "a send past its time limit is said as may have been sent"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*worker\.join\(self\._choices\.send_timeout_s\)$'
+replace = 'worker.join()'

@@ -1,0 +1,5 @@
+[[rule]]
+name = "a token is bound to one report and the services its question named"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*named = asked\.labels$'
+replace = 'named = frozenset(sink.label for sink in self.sinks.private)'

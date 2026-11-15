@@ -16,7 +16,7 @@ import urllib.error
 
 import pytest
 
-from fuel_mcp.model import Fuel, SourceUnavailableError
+from fuel_mcp.model import Fuel, SourceUnavailableError, Station
 from fuel_mcp.sources import drivstoffpriser
 from fuel_mcp.sources.drivstoffpriser import DrivstoffpriserSource, Response
 
@@ -160,6 +160,22 @@ def test_an_export_in_a_changed_format_is_unavailable_not_a_crash(tmp_path):
 
     with pytest.raises(SourceUnavailableError, match="format"):
         DrivstoffpriserSource(tmp_path, fetch=broken, now=Clock()).prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)
+
+
+def test_the_station_list_gives_every_station_with_its_name_and_place(tmp_path):
+    stations = _source(tmp_path, Host()).stations()
+    assert stations == [
+        Station("osm_1", "Made-up North", "Brand A", 0.009, 0.0),
+        Station("ck_2", "Made-up East", "Brand B", 0.0, 0.018),
+    ]
+
+
+def test_a_station_list_in_a_changed_format_is_unavailable_not_a_crash(tmp_path):
+    def broken(_url, _headers, _timeout=None):
+        return Response(200, {}, b'{"stations": "not a list"}')
+
+    with pytest.raises(SourceUnavailableError, match="format"):
+        DrivstoffpriserSource(tmp_path, fetch=broken, now=Clock()).stations()
 
 
 class _Reply(io.BytesIO):

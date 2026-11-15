@@ -1,0 +1,5 @@
+[[rule]]
+name = "the newest price for a station wins whichever it comes from"
+file = "src/fuel_mcp/service.py"
+find = '^\s*if key not in newest or p\.updated_at > newest\[key\]\.updated_at:$'
+replace = 'if key not in newest:'

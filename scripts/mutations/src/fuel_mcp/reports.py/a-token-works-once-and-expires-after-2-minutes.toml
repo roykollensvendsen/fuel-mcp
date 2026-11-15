@@ -1,0 +1,5 @@
+[[rule]]
+name = "a token works once and expires after 2 minutes"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*if asked is None or self\._now\(\) - asked\.asked_at > TOKEN_FOR:$'
+replace = 'if asked is None:'

@@ -1,0 +1,5 @@
+[[rule]]
+name = "a price outside the allowed range is not saved"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*if not self\._choices\.price_low <= price <= self\._choices\.price_high:$'
+replace = 'if False:'

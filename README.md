@@ -19,11 +19,14 @@ when its input closes:
 $ uv run fuel-mcp serve --simulate < /dev/null
 ```
 
-## The tool
+## The tools
 
 | Tool | What it does |
 | --- | --- |
 | `fuel_price` | Names the cheapest station near you, its price, distance and age. It reads only. |
+| `fuel_report` | Saves a pump price you say as your own report, on this machine. |
+| `fuel_report_undo` | Takes your latest report back, within 10 minutes. |
+| `fuel_report_confirm` | Sends the report on, only after your yes to its question. |
 
 It takes `fuel` (`diesel`, `petrol95` or `petrol98`), and the
 phone's position as `lat`, `lon` and `accuracy_m`. The search widens by the
@@ -66,9 +69,37 @@ $ XDG_CONFIG_HOME=tests/settings-examples uv run fuel-mcp price
 unknown source 'petrolbot'; the known ones are drivstoffpriser. Fix sources in tests/settings-examples/fuel-mcp/config.toml
 ```
 
-## Your own reports
+## Reporting a price by voice
 
-This part is the groundwork only: no tool uses it yet.
+Say the price you see at the pump, such as "diesel is 21.49 here". The voice
+calls `fuel_report` with your position. It saves at once and says it back:
+"Saved: diesel twenty-one forty-nine at …, as your own report. Say 'undo' to
+take it back." Nothing is sent anywhere by this.
+
+The station is the one within 300 m of you, widened by the position's
+accuracy. When two are that close, it asks which, and saves nothing yet. A
+position rougher than 300 m is not used: say the station's name instead. A name
+is matched without minding case or accents, against your own names first, then
+the station list. A price outside `price_low` to `price_high` is said back as
+looking wrong, and not saved.
+
+Ask for a price afterwards and your report counts beside the source's prices.
+The newest price for a station wins. Yours is said as your own, with its age,
+until `own_report_hours` have passed. A price the source only estimates is said
+apart, and never chosen over a reported one.
+
+With a sender of your own set up, the voice then asks "Send it to … too?". Only
+your yes sends it, once, within 2 minutes. "Only <service>" narrows it. One
+service refusing leaves the others sent. A sender silent past `send_timeout_s`
+is said as "may have been sent". Undo never takes back what was sent.
+
+```toml
+send_timeout_s = 15         # how long one send may take, 1 to 60 seconds; 15 when not set
+[station_names]             # your own names for stations, matched first
+"my usual" = "osm_1"        # a station's id from the list; this one is made up
+```
+
+## Your own reports
 
 A price you report yourself is kept on your own list, on this machine only.
 The list is `~/.local/state/fuel-mcp/own-reports.jsonl`, readable by you

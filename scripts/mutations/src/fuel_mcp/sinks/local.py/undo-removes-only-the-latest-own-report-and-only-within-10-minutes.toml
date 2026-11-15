@@ -1,0 +1,5 @@
+[[rule]]
+name = "undo removes only the latest own report and only within 10 minutes"
+file = "src/fuel_mcp/sinks/local.py"
+find = '^\s*if latest is None or now - latest\.reported_at > within:$'
+replace = 'if latest is None:'

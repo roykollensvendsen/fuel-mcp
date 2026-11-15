@@ -12,7 +12,7 @@ from __future__ import annotations
 import datetime as dt
 
 from fuel_mcp.geo import distance_km
-from fuel_mcp.model import Fuel, SourceUnavailableError, StationPrice
+from fuel_mcp.model import Fuel, SourceUnavailableError, Station, StationPrice
 
 #: How much further than asked the fake looks, as a real source's coarse box would.
 _SLACK_KM = 20.0
@@ -25,6 +25,8 @@ _STATIONS: tuple[tuple[str, float, float, dict[Fuel, tuple[float, float]]], ...]
     ("Delta", 0.09, 0.0, {Fuel.DIESEL: (18.99, 2), Fuel.PETROL95: (19.99, 2)}),
     # The cheapest diesel nearby, but ten days old, as so much of the real export is.
     ("Epsilon", 0.0, 0.03, {Fuel.DIESEL: (18.49, 240)}),
+    # No price at all, and 220 m from Gamma: a report between the two must say which.
+    ("Zeta", 0.0, -0.004, {}),
 )
 
 
@@ -66,3 +68,13 @@ class FakeSource:
                 )
             )
         return found
+
+    def stations(self) -> list[Station]:
+        """Every made-up station, priced or not."""
+        if self._failing:
+            msg = "the fake was told to fail"
+            raise SourceUnavailableError(msg)
+        return [
+            Station(f"fake_{name.lower()}", f"Fake Fuel {name}", "Fake Fuel", s_lat, s_lon)
+            for name, s_lat, s_lon, _ in _STATIONS
+        ]

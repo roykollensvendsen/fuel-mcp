@@ -1,0 +1,5 @@
+[[rule]]
+name = "an own report is said as the owner's own with its age"
+file = "src/fuel_mcp/service.py"
+find = '^\s*if best\.own:$'
+replace = 'if False:'

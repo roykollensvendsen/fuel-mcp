@@ -13,12 +13,15 @@ They live in ``$XDG_CONFIG_HOME/fuel-mcp/config.toml``, normally
     own_report_keep_hours = 12      # how long it is kept, from the hours above to 2160; 12
     price_low = 10                  # a price below this is not believed, per litre; 10
     price_high = 40                 # a price above this is not believed; 40
+    send_timeout_s = 15             # how long one send to a sender may take, 1 to 60 seconds; 15
     [home]                          # used when the voice gives no position
     lat = 0.0
     lon = 0.0
     [[private_sinks]]               # only for the owner's own sender; see fuel_mcp.sinks
     folder = "~/src/fuel-mcp-private"
     sink = "fuel_mcp_private.sinks.example:ExampleSink"
+    [station_names]                 # the owner's own names for stations, matched first
+    "my usual" = "osm_1"            # a station's id from the source's list, made up here
 
 A source not listed is fully off: its module is never imported. A private sink
 is only listed here; nothing of it is loaded while the settings are read.
@@ -67,6 +70,9 @@ class Settings:
     own_report_keep_hours: int = 12
     price_low: float = 10.0
     price_high: float = 40.0
+    send_timeout_s: float = 15.0
+    #: The owner's own names for stations: they say where he goes, so never in a repr.
+    station_names: Mapping[str, str] = field(default_factory=dict, repr=False)
     #: The owner's own senders, as listed; their folders are private, so never in a repr.
     private_sinks: tuple[PrivateSinkEntry, ...] = field(default=(), repr=False)
 
@@ -139,6 +145,8 @@ OWN_REPORT_HOURS_LIMITS = (1, 168)
 OWN_REPORT_KEEP_HOURS_LIMITS = (1, 2160)
 #: The believable price bounds an owner may set, per litre.
 PRICE_LIMITS = (1, 100)
+#: How long one send to a private sender may take, in seconds.
+SEND_TIMEOUT_LIMITS = (1, 60)
 #: Each number's default when the owner sets none.
 DEFAULTS: dict[str, float] = {
     "farthest_km": Choices.farthest_km,
@@ -147,6 +155,7 @@ DEFAULTS: dict[str, float] = {
     "own_report_keep_hours": 12,
     "price_low": 10,
     "price_high": 40,
+    "send_timeout_s": 15,
 }
 #: Every sink the public package has. A private sender goes in [[private_sinks]].
 KNOWN_SINKS = ("local",)
@@ -173,6 +182,8 @@ def _reports(table: Mapping[str, object], path: pathlib.Path) -> dict[str, Any]:
         "own_report_keep_hours": keep,
         "price_low": low,
         "price_high": high,
+        "send_timeout_s": float(_within(table, "send_timeout_s", SEND_TIMEOUT_LIMITS, path, whole=False)),
+        "station_names": _station_names(table.get("station_names", {}), path),
         "private_sinks": _private_sinks(table.get("private_sinks", []), path),
     }
 
@@ -194,6 +205,16 @@ def _sinks(table: Mapping[str, object], path: pathlib.Path) -> tuple[str, ...]:
         log.warning("fuel-mcp: sinks in %s leaves out local; it is always on, so it was added", path)
         sinks = ["local", *sinks]
     return tuple(dict.fromkeys(sinks))
+
+
+def _station_names(names: object, path: pathlib.Path) -> dict[str, str]:
+    """The owner's own names for stations, each a name and a station id, both text."""
+    if not isinstance(names, dict) or not all(isinstance(v, str) for v in names.values()):
+        msg = (
+            f'[station_names] in {path} maps a name to a station id, written as: "my usual" = "<station id>"'
+        )
+        raise SettingsError(msg)
+    return {str(k): v for k, v in names.items()}
 
 
 def _private_sinks(entries: object, path: pathlib.Path) -> tuple[PrivateSinkEntry, ...]:

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from fuel_mcp.geo import distance_km
-from fuel_mcp.model import Fuel, SourceUnavailableError, StationPrice
+from fuel_mcp.model import Fuel, SourceUnavailableError, Station, StationPrice
 from fuel_mcp.speech import NORWAY
 
 if TYPE_CHECKING:
@@ -157,6 +157,11 @@ class DrivstoffpriserSource:
             if p.fuel == fuel and distance_km(lat, lon, p.lat, p.lon) <= radius_km
         ]
 
+    def stations(self) -> list[Station]:
+        """Every station in the export's list, priced or not, so a report can name one."""
+        self._deadline = self._elapsed() + BUDGET_S
+        return parse_stations(self._file(FILES[0]))
+
     def _file(self, name: str) -> bytes:
         """The file's body, from the copy or from the host."""
         copy, tags = self._cache / name, self._cache / f"{name}.tags.json"
@@ -291,6 +296,24 @@ def parse_export(stations: bytes, prices: bytes, *, source: str) -> list[Station
         msg = f"the export is in a format this version does not know: {error!r}"
         raise SourceUnavailableError(msg) from error
     return found
+
+
+def parse_stations(stations: bytes) -> list[Station]:
+    """The export's station list; raises SourceUnavailableError when its format is unknown."""
+    try:
+        return [
+            Station(
+                station_id=str(s["id"]),
+                name=str(s["name"]),
+                brand=str(s["brand"]),
+                lat=float(s["latitude"]),
+                lon=float(s["longitude"]),
+            )
+            for s in _records(stations, "stations")
+        ]
+    except (KeyError, TypeError, ValueError) as error:
+        msg = f"the station list is in a format this version does not know: {error!r}"
+        raise SourceUnavailableError(msg) from error
 
 
 def _records(body: bytes, key: str) -> list[dict[str, Any]]:
