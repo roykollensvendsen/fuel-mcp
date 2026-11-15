@@ -164,10 +164,42 @@ def _remove(folder: pathlib.Path) -> None:
     shutil.rmtree(folder, onexc=_writable_again)
 
 
+def _not_ours(why: str) -> str:
+    return (
+        f"{MUTATE_TMP} {why}. Its name is easy to guess in a shared temporary folder, so this run"
+        f" will not use it. Look at what is there, remove it if it is not yours (rm -r {MUTATE_TMP}),"
+        " and run again."
+    )
+
+
+def own_folder() -> None:
+    """Make MUTATE_TMP if it is missing, and stop the run unless it is really ours.
+
+    Its name is fixed, in a folder every user shares. Only a folder of this user's that no
+    one else may enter is used, so nothing planted there first can steer what is removed.
+    """
+    with contextlib.suppress(FileExistsError):  # whatever is there is looked at below
+        MUTATE_TMP.mkdir(mode=0o700, parents=True)
+    try:
+        # RULE: a link at the run's folder is never followed
+        fd = os.open(MUTATE_TMP, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as error:  # a link, a file, or something else planted at the name
+        raise SystemExit(_not_ours(f"is not a folder of yours ({error.strerror})")) from None
+    try:
+        found = os.fstat(fd)
+    finally:
+        os.close(fd)
+    mode = stat.S_IMODE(found.st_mode)
+    # RULE: a run trusts its folder only when it is really ours
+    if not stat.S_ISDIR(found.st_mode) or found.st_uid != os.getuid() or mode & 0o077:
+        raise SystemExit(_not_ours(f"is not a private folder of yours (owner {found.st_uid}, mode {mode:o})"))
+
+
 def sweep() -> None:
     """Remove what an earlier run, killed before it could clean up, left behind."""
+    own_folder()
     # RULE: a killed run's temporary files are swept at the next start
-    for left in MUTATE_TMP.iterdir() if MUTATE_TMP.is_dir() else []:
+    for left in MUTATE_TMP.iterdir():
         _remove(left)
 
 
@@ -243,7 +275,7 @@ def run_suite() -> tuple[int, list[str]]:
     # the wrong rule, so no bytecode is written at all.
     # RULE: two mutations never share a bytecode cache
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-    MUTATE_TMP.mkdir(parents=True, exist_ok=True)
+    own_folder()
     temporary = pathlib.Path(tempfile.mkdtemp(prefix="run-", dir=MUTATE_TMP))
     try:
         r = subprocess.run(  # noqa: S603 - this interpreter, pytest, and a folder this script made

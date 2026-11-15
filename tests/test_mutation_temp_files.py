@@ -9,6 +9,7 @@ whatever a killed run left is swept away at the next start.
 """
 
 import importlib.util
+import os
 import pathlib
 import signal
 import subprocess
@@ -70,6 +71,7 @@ def test_removing_a_run_s_files_never_changes_a_folder_it_links_to(tmp_path, mon
 
 def test_a_killed_run_s_temporary_files_are_swept_at_the_next_start(tmp_path, monkeypatch):
     mutate = _mutate(tmp_path, monkeypatch)
+    mutate.MUTATE_TMP.mkdir(mode=0o700)
     left = mutate.MUTATE_TMP / "run-left-by-a-killed-run"
     (left / "shut").mkdir(parents=True)
     (left / "shut" / "inside.txt").write_text("x")
@@ -215,3 +217,42 @@ def test_a_second_signal_cannot_cut_the_cleanup_short_of_a_whole_run(tmp_path, m
     assert (tmp_path / "project/rule.py").read_text() == "x = 1\n", out
     assert not (tmp_path / "recovery.json").exists()
     assert not (tmp_path / "mutate-tmp").exists()
+
+
+def _refused(step):
+    with pytest.raises(SystemExit) as stopped:
+        step()
+    return str(stopped.value.code)
+
+
+def test_a_run_trusts_its_folder_only_when_it_is_really_ours(tmp_path, monkeypatch):
+    """Its name is easy to guess in a shared /tmp, so a folder planted there first is never used."""
+    mutate = _mutate(tmp_path, monkeypatch)
+    folder = mutate.MUTATE_TMP
+    folder.mkdir(mode=0o700)
+    folder.chmod(0o755)  # others may enter
+    for step in (mutate.sweep, mutate.run_suite):
+        said = _refused(step)
+        assert str(folder) in said
+        assert f"rm -r {folder}" in said
+    folder.chmod(0o700)
+    mine = os.getuid()
+    monkeypatch.setattr(mutate.os, "getuid", lambda: mine + 1)  # someone else's
+    assert str(folder) in _refused(mutate.sweep)
+
+
+def test_a_file_planted_at_the_run_s_folder_stops_the_run(tmp_path, monkeypatch):
+    mutate = _mutate(tmp_path, monkeypatch)
+    mutate.MUTATE_TMP.write_text("not a folder")
+    assert str(mutate.MUTATE_TMP) in _refused(mutate.sweep)
+    assert mutate.MUTATE_TMP.read_text() == "not a folder"
+
+
+def test_a_link_at_the_run_s_folder_is_never_followed(tmp_path, monkeypatch):
+    mutate = _mutate(tmp_path, monkeypatch)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    (elsewhere / "kept").write_text("x")
+    mutate.MUTATE_TMP.symlink_to(elsewhere)
+    assert str(mutate.MUTATE_TMP) in _refused(mutate.sweep)
+    assert (elsewhere / "kept").exists()
