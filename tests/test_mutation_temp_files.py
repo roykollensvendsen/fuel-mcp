@@ -156,7 +156,7 @@ def _until(path, child, deadline):
 
 
 @pytest.mark.parametrize("stop", [signal.SIGTERM, signal.SIGHUP], ids=["SIGTERM", "SIGHUP"])
-def test_a_stopped_run_cleans_up_as_an_interrupted_one_does(tmp_path, monkeypatch, stop):
+def test_a_stopped_run_puts_the_tree_back_in_a_whole_run(tmp_path, monkeypatch, stop):
     """A cancelled CI job or a closed terminal stops the run by signal, and `finally` must still run."""
     _whole_run(tmp_path, monkeypatch)
     child = subprocess.Popen(
@@ -190,7 +190,7 @@ mutate.restore = slow_restore
 """
 
 
-def test_a_second_stop_does_not_cut_the_cleanup_short(tmp_path, monkeypatch):
+def test_a_second_signal_cannot_cut_the_cleanup_short_of_a_whole_run(tmp_path, monkeypatch):
     """GitHub cancels with SIGINT, then SIGTERM: the second must not cut the first one's cleanup short."""
     _whole_run(tmp_path, monkeypatch)
     script = STOPPED_RUN.replace("mutate.run_suite = held\n", "mutate.run_suite = held\n" + SLOW_CLEANUP)

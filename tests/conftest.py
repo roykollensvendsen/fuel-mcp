@@ -23,6 +23,7 @@ import pathlib
 import re
 import secrets
 import shutil
+import signal
 import socket
 import stat
 import tempfile
@@ -181,3 +182,17 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect_ex", _connect_unless_internet)
     monkeypatch.setattr(socket, "create_connection", _refuse)
     monkeypatch.setattr(socket, "getaddrinfo", _refuse)
+
+
+@pytest.fixture(autouse=True)
+def _signal_handlers_kept():
+    """A test that runs a script's `main()` installs its stop handlers in this process.
+
+    Put the test run's own back afterwards, so Ctrl-C still stops pytest and a later
+    test of those handlers starts from a process that has none.
+    """
+    stops = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    before = {each: signal.getsignal(each) for each in stops}
+    yield
+    for each, handler in before.items():
+        signal.signal(each, handler)

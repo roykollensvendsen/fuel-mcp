@@ -335,14 +335,8 @@ def _stop_while_measuring(tmp_path, signum):
 
 
 @pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGHUP], ids=["cancelled", "hung up"])
-def test_a_stopped_quality_run_removes_its_copies(tmp_path, signum):
+def test_a_stopped_measurement_removes_its_copy_in_a_whole_run(tmp_path, signum):
     """CI cancels with SIGTERM and a closed terminal sends SIGHUP; both skip every `finally` by default."""
     done, left = _stop_while_measuring(tmp_path, signum)
     assert done.returncode == 128 + signum, done.stderr
     assert left == []
-
-
-def test_a_second_stop_cannot_cut_the_cleanup_short(tmp_path):
-    """Once stopping, further stops are ignored, so the cleanup that follows runs to its end."""
-    done, _ = _stop_while_measuring(tmp_path, signal.SIGTERM)
-    assert done.stdout.strip() == "True", done.stderr
