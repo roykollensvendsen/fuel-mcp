@@ -1,0 +1,11 @@
+#!/bin/sh
+# Refuse a commit that would publish where the owner lives or fills up. This is
+# the one check that knows home and the stations near it, from the owner's own
+# ~/.config/fuel-mcp/; CI has neither, and checks only the patterns. Turn it on
+# for a clone with
+#
+#     git config core.hooksPath .githooks
+#
+set -e
+root="$(git rev-parse --show-toplevel)"
+python3 "$root/scripts/private_data_scan.py"
