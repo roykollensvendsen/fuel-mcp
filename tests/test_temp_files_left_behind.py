@@ -158,8 +158,6 @@ def test_measuring_the_base_leaves_nothing_in_the_temporary_folder(tmp_path, mon
     ratchet = _ratchet(monkeypatch, temp)
 
     def run(*command, cwd=None, env=None):
-        if command[:3] == ("git", "worktree", "add"):
-            pathlib.Path(command[-2]).mkdir()
         if "measure" in command:
             _leaves_a_file(env)
             out = pathlib.Path(command[command.index("--out") + 1])
