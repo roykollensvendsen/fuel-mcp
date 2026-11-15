@@ -35,7 +35,7 @@ def test_diesel_is_the_fuel_when_none_is_named():
     assert answer["credit"] == CREDIT
 
 
-def test_the_owners_default_fuel_is_used_when_none_is_named():
+def test_the_owner_s_usual_fuel_is_used_when_none_is_named():
     service = FuelService(FakeSource(now=NOW), now=lambda: NOW, fuel=Fuel.PETROL95)
     answer = _call(build_server(service), "fuel_price", lat=0.0, lon=0.0)
     assert answer["say"].startswith("Petrol 95 is cheapest")
