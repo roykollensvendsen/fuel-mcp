@@ -1,0 +1,5 @@
+[[rule]]
+name = "a report is saved locally before anything is sent"
+file = "src/fuel_mcp/sinks/__init__.py"
+find = '^\s*self\.local\.take\(report\)$'
+replace = 'pass'

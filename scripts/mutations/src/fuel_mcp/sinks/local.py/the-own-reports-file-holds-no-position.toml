@@ -1,0 +1,5 @@
+[[rule]]
+name = "the own-reports file holds no position"
+file = "src/fuel_mcp/sinks/local.py"
+find = '^\s*line = \{field: getattr\(report, field\) for field in FIELDS\}$'
+replace = 'line = dict(vars(report))'

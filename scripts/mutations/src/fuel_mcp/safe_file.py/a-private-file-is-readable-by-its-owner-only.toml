@@ -1,0 +1,5 @@
+[[rule]]
+name = "a private file is readable by its owner only"
+file = "src/fuel_mcp/safe_file.py"
+find = '^MODE = 0o600$'
+replace = 'MODE = 0o644'

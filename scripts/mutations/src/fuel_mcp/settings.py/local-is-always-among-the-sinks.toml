@@ -1,0 +1,5 @@
+[[rule]]
+name = "\"local\" is always among the sinks"
+file = "src/fuel_mcp/settings.py"
+find = '^    if "local" not in sinks:$'
+replace = 'if False:'

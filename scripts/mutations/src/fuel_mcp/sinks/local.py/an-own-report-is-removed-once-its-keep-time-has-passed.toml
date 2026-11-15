@@ -1,0 +1,5 @@
+[[rule]]
+name = "an own report is removed once its keep time has passed"
+file = "src/fuel_mcp/sinks/local.py"
+find = '^\s*kept = \[r for r in everything if now - r\.reported_at <= self\._keep\]$'
+replace = 'kept = everything'

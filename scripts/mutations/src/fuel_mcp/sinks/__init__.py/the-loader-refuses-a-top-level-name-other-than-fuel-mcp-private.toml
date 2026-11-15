@@ -1,0 +1,5 @@
+[[rule]]
+name = "the loader refuses a top-level name other than fuel_mcp_private"
+file = "src/fuel_mcp/sinks/__init__.py"
+find = '^\s*if names != \[PACKAGE\]:$'
+replace = 'if False:'

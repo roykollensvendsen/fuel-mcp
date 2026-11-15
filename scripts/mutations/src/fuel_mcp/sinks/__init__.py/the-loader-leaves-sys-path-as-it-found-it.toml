@@ -1,0 +1,5 @@
+[[rule]]
+name = "the loader leaves sys.path as it found it"
+file = "src/fuel_mcp/sinks/__init__.py"
+find = '^\s*sys\.path\[:\] = saved$'
+replace = 'pass'

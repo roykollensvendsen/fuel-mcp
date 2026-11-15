@@ -66,6 +66,32 @@ $ XDG_CONFIG_HOME=tests/settings-examples uv run fuel-mcp price
 unknown source 'petrolbot'; the known ones are drivstoffpriser. Fix sources in tests/settings-examples/fuel-mcp/config.toml
 ```
 
+## Your own reports
+
+This part is the groundwork only: no tool uses it yet.
+
+A price you report yourself is kept on your own list, on this machine only.
+The list is `~/.local/state/fuel-mcp/own-reports.jsonl`, readable by you
+alone. Each line holds the station's id and name, the fuel, the price and the
+time. It never holds a position. Stations and times still show where you were,
+so a report is removed once its keep time has passed. These settings go in the
+same file as the ones above:
+
+```toml
+sinks = ["local"]          # your own list; it is always on, even if left out
+own_report_hours = 12      # how long your report counts, 1 to 168 hours; 12 when not set
+own_report_keep_hours = 12 # how long it is kept, at least the hours above, up to 2160; 12
+price_low = 10             # a price below this per litre is not believed; 10 when not set
+price_high = 40            # a price above this is not believed; 40 when not set
+```
+
+This repository holds no code that sends a report anywhere, and its tests
+check that. A sender of your own lives in a private repository of yours. It is
+named only in your local settings, under `[[private_sinks]]`, with a folder and
+a `fuel_mcp_private.<module>:<Class>`. The loader in `src/fuel_mcp/sinks/`
+checks that folder before it imports anything. If any check fails, nothing is
+sent, and the report is still kept on your list.
+
 ## The data
 
 Data: Drivstoffpriser (ODbL), stations © OpenStreetMap contributors.

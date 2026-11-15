@@ -16,6 +16,7 @@ from fuel_mcp.settings import (
     cache_folder,
     config_folder,
     load_settings,
+    state_folder,
 )
 from fuel_mcp.simulator import FakeSource
 
@@ -214,3 +215,95 @@ def test_the_search_limits_have_one_default():
         Choices().farthest_km,
         Choices().old_after_days,
     )
+
+
+# -- the owner's own reports ---------------------------------------------------------------
+
+
+def test_the_report_settings_are_read_and_have_defaults(tmp_path):
+    defaults = load_settings(tmp_path / "absent")
+    assert defaults.sinks == ("local",)
+    assert (defaults.own_report_hours, defaults.own_report_keep_hours) == (12, 12)
+    assert (defaults.price_low, defaults.price_high) == (10.0, 40.0)
+    assert defaults.private_sinks == ()
+    chosen = load_settings(
+        _config(
+            tmp_path,
+            "own_report_hours = 6\nown_report_keep_hours = 48\nprice_low = 12\nprice_high = 35.5\n",
+        )
+    )
+    assert (chosen.own_report_hours, chosen.own_report_keep_hours) == (6, 48)
+    assert (chosen.price_low, chosen.price_high) == (12.0, 35.5)
+
+
+@pytest.mark.parametrize(
+    ("line", "key", "fix"),
+    [
+        ("own_report_hours = 0", "own_report_hours", "a whole number from 1 to 168"),
+        ("own_report_hours = 1.5", "own_report_hours", "a whole number from 1 to 168"),
+        ("own_report_keep_hours = 2161", "own_report_keep_hours", "a whole number from 1 to 2160"),
+        ("price_low = 0", "price_low", "a number from 1 to 100"),
+        ("price_high = nan", "price_high", "a number from 1 to 100"),
+    ],
+)
+def test_a_report_setting_outside_its_limits_names_the_fix_and_the_file(tmp_path, line, key, fix):
+    with pytest.raises(SettingsError, match=rf"{key} must be {fix}.*Fix {key} in .*config\.toml"):
+        load_settings(_config(tmp_path, line + "\n"))
+
+
+def test_an_own_report_is_kept_at_least_as_long_as_it_counts(tmp_path):
+    # Kept for less time than it counts, a report would vanish while it still should be said.
+    with pytest.raises(SettingsError, match=r"own_report_keep_hours must be at least .*config\.toml"):
+        load_settings(_config(tmp_path, "own_report_hours = 24\nown_report_keep_hours = 12\n"))
+
+
+def test_the_lowest_believable_price_is_below_the_highest(tmp_path):
+    with pytest.raises(SettingsError, match=r"price_low must be below price_high.*config\.toml"):
+        load_settings(_config(tmp_path, "price_low = 30\nprice_high = 30\n"))
+
+
+def test_local_is_always_among_the_sinks(tmp_path, caplog):
+    # A private sender must never hold the only copy of a report.
+    settings = load_settings(_config(tmp_path, "sinks = []\n"))
+    assert settings.sinks == ("local",)
+    assert "always on" in caplog.text
+
+
+@pytest.mark.parametrize("line", ['sinks = ["elsewhere"]', 'sinks = "local"', "sinks = [1]"])
+def test_an_unknown_sink_names_the_fix_and_the_file(tmp_path, line):
+    with pytest.raises(SettingsError, match=r"sink.*config\.toml"):
+        load_settings(_config(tmp_path, line + "\n"))
+
+
+def test_a_private_sink_is_listed_and_nothing_of_it_is_loaded(tmp_path):
+    folder = tmp_path / "private"
+    settings = load_settings(
+        _config(
+            tmp_path,
+            f'[[private_sinks]]\nfolder = "{folder}"\nsink = "fuel_mcp_private.example:ExampleSink"\n',
+        )
+    )
+    assert [(e.folder, e.sink) for e in settings.private_sinks] == [
+        (folder, "fuel_mcp_private.example:ExampleSink")
+    ]
+    assert str(folder) not in repr(settings)
+    assert "fuel_mcp_private" not in sys.modules
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '[[private_sinks]]\nfolder = "/x"\n',
+        '[[private_sinks]]\nfolder = "/x"\nsink = 3\n',
+        '[[private_sinks]]\nfolder = "/x"\nsink = "fuel_mcp_private.a:B"\nkey = "secret"\n',
+        'private_sinks = "nothing"\n',
+    ],
+)
+def test_a_private_sink_entry_of_the_wrong_shape_names_the_fix(tmp_path, text):
+    with pytest.raises(SettingsError, match=r"\[\[private_sinks\]\] in .*config\.toml needs exactly"):
+        load_settings(_config(tmp_path, text))
+
+
+def test_the_state_folder_follows_xdg():
+    assert state_folder({"XDG_STATE_HOME": "/st"}) == pathlib.Path("/st/fuel-mcp")
+    assert state_folder({"HOME": "/h"}) == pathlib.Path("/h/.local/state/fuel-mcp")

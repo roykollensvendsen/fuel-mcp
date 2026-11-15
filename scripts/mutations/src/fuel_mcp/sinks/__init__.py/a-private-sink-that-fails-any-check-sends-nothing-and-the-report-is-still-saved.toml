@@ -1,0 +1,5 @@
+[[rule]]
+name = "a private sink that fails any check sends nothing, and the report is still saved"
+file = "src/fuel_mcp/sinks/__init__.py"
+find = '^        return \[\]$'
+replace = 'pass'

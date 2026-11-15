@@ -1,0 +1,5 @@
+[[rule]]
+name = "the loader refuses a private sink whose needs_yes isn't True"
+file = "src/fuel_mcp/sinks/__init__.py"
+find = '^\s*if getattr\(sink, "needs_yes", None\) is not True:$'
+replace = 'if False:'

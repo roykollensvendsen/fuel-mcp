@@ -1,0 +1,5 @@
+[[rule]]
+name = "a failed private write leaves the old file and no temporary"
+file = "src/fuel_mcp/safe_file.py"
+find = '^\s*temp\.unlink\(\)$'
+replace = 'pass'

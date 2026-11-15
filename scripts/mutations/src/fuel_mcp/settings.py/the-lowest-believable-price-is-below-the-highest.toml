@@ -1,0 +1,5 @@
+[[rule]]
+name = "the lowest believable price is below the highest"
+file = "src/fuel_mcp/settings.py"
+find = '^    if low >= high:$'
+replace = 'if False:'

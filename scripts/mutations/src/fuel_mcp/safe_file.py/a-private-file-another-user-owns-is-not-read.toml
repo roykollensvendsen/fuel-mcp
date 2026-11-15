@@ -1,0 +1,5 @@
+[[rule]]
+name = "a private file another user owns is not read"
+file = "src/fuel_mcp/safe_file.py"
+find = '^\s*if facts\.st_uid != os\.getuid\(\) or not stat\.S_ISREG\(facts\.st_mode\):$'
+replace = 'if False:'
