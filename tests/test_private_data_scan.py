@@ -74,7 +74,7 @@ def test_missing_config_files_hold_nothing(tmp_path):
     ],
     ids=["list not toml", "words not a list", "a word not text", "config not toml", "home not numbers"],
 )
-def test_a_broken_private_file_refuses_the_commit_without_quoting_it(tmp_path, capsys, name, text):
+def test_a_broken_private_file_refuses_the_commit_never_skips_the_check(tmp_path, capsys, name, text):
     (tmp_path / name).write_text(text)
     assert private_data_scan.main(["--config-dir", str(tmp_path)]) == 2
     err = capsys.readouterr().err
