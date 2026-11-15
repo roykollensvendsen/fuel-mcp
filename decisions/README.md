@@ -30,6 +30,7 @@ decision nobody writes down.
 | Id | Decides | Status |
 |---|---|---|
 | [ADR-FM-001](ADR-FM-001-check-the-export-hourly-with-a-conditional-get.md) | Check the open export at most hourly, with a conditional GET | Accepted |
+| [ADR-FM-002](ADR-FM-002-main-keeps-the-quality-levels.md) | Main keeps the quality levels, so a pull request never records them | Accepted |
 
 What is deliberately left undone, and what would make each worth doing, is
 [`deferred.md`](deferred.md). A thing left undone with no trigger is a thing
