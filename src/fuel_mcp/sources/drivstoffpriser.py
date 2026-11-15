@@ -27,7 +27,13 @@ if TYPE_CHECKING:
 BASE_URL = "https://drivstoffpriser.github.io/Drivstoffpriser-App/data/"
 FILES = ("stations.json", "prices.json")
 CHECK_EVERY = dt.timedelta(hours=1)
-TIMEOUT_S = 10
+#: After a failed check the host is left alone this long, and the copy answers at once.
+RETRY_AFTER = dt.timedelta(minutes=10)
+#: Seconds to wait on the host. A failure stops the rest of the question's asks, so the
+#: voice, which gives up after about 15 s, waits for at most one of these.
+TIMEOUT_S = 5
+#: When the host last failed, kept beside the copy so a restart does not ask again at once.
+FAILED_AT = "host-failed-at"
 NOT_MODIFIED, OK = 304, 200
 #: A generic name: the request says which program asks, never who.
 USER_AGENT = "fuel-mcp"
@@ -91,24 +97,31 @@ class DrivstoffpriserSource:
         # RULE: a copy checked within the hour is used without asking
         if checked is not None and now - checked < CHECK_EVERY:
             return copy.read_bytes()
+        # RULE: a failing host is not asked again for ten minutes
+        if self._failed_recently(now):
+            return self._copy_or_unavailable(name, meta, "the host failed a few minutes ago")
         # RULE: a check sends back the tag from the last answer
         ask = {header: meta[key] for header, key in CONDITIONAL if key in meta}
         try:
             reply = self._fetch(BASE_URL + name, ask)
         except OSError as error:  # URLError and timeouts are OSErrors too
-            if meta:
-                return copy.read_bytes()
-            msg = f"{name} could not be fetched and there is no copy: {error}"
-            raise SourceUnavailableError(msg) from error
+            return self._failed(now, name, meta, f"could not be fetched: {error}")
         if reply.status == NOT_MODIFIED and meta:
             meta["checked_at"] = now.isoformat()
             tags.write_text(json.dumps(meta))
+            self._recovered()
             return copy.read_bytes()
         if reply.status != OK:
-            if meta:
-                return copy.read_bytes()
-            msg = f"{name} answered {reply.status} and there is no copy"
-            raise SourceUnavailableError(msg)
+            return self._failed(now, name, meta, f"answered {reply.status}")
+        return self._store(now, name, meta, reply)
+
+    def _store(self, now: dt.datetime, name: str, meta: dict[str, str], reply: Response) -> bytes:
+        """Keep a new body and its tags, but only once it reads; a bad one leaves the copy alone."""
+        copy, tags = self._cache / name, self._cache / f"{name}.tags.json"
+        try:
+            _records(reply.body, name.removesuffix(".json"))
+        except (KeyError, TypeError, ValueError) as error:
+            return self._failed(now, name, meta, f"came in a format this version does not know: {error!r}")
         headers = {k.lower(): v for k, v in reply.headers.items()}
         self._cache.mkdir(parents=True, exist_ok=True)
         copy.write_bytes(reply.body)
@@ -119,7 +132,32 @@ class DrivstoffpriserSource:
             if h in headers
         }
         tags.write_text(json.dumps(fresh))
+        self._recovered()
         return reply.body
+
+    def _failed_recently(self, now: dt.datetime) -> bool:
+        marker = self._cache / FAILED_AT
+        if not marker.is_file():
+            return False
+        try:
+            return now - dt.datetime.fromisoformat(marker.read_text().strip()) < RETRY_AFTER
+        except ValueError:
+            return False
+
+    def _failed(self, now: dt.datetime, name: str, meta: dict[str, str], why: str) -> bytes:
+        """Note the failure, so the host is left alone for a while, then answer from the copy."""
+        self._cache.mkdir(parents=True, exist_ok=True)
+        (self._cache / FAILED_AT).write_text(now.isoformat())
+        return self._copy_or_unavailable(name, meta, why)
+
+    def _recovered(self) -> None:
+        (self._cache / FAILED_AT).unlink(missing_ok=True)
+
+    def _copy_or_unavailable(self, name: str, meta: dict[str, str], why: str) -> bytes:
+        if meta:
+            return (self._cache / name).read_bytes()
+        msg = f"{name} {why}, and there is no copy"
+        raise SourceUnavailableError(msg)
 
 
 def parse_export(stations: bytes, prices: bytes, *, source: str) -> list[StationPrice]:
