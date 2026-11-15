@@ -68,6 +68,7 @@ class FuelService:
 
     def _chosen(self, fuel: Fuel | None) -> Fuel:
         """The fuel named, or the owner's usual one when none is."""
+        # RULE: the owner's usual fuel is used when none is named
         return fuel or self._fuel
 
     def price(

@@ -96,6 +96,7 @@ def _fuel(table: Mapping[str, object], path: pathlib.Path) -> Fuel:
     """The fuel a question means when it names none; diesel unless the owner chose another."""
     chosen = table.get("fuel", Fuel.DIESEL.value)
     known = [f.value for f in Fuel]
+    # RULE: an unknown default fuel names the known ones and the file
     if chosen not in known:
         msg = f"unknown fuel {chosen!r}; the known ones are {', '.join(known)}. Fix fuel in {path}"
         raise SettingsError(msg)
