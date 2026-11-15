@@ -42,8 +42,23 @@ def test_a_station_beyond_the_search_radius_is_never_chosen():
 
 
 def test_a_poor_position_widens_the_search_by_its_accuracy():
-    answer = _service().price(Fuel.DIESEL, lat=0.0, lon=0.0, accuracy_m=6000)
-    assert answer["station"]["name"] == "Fake Fuel Delta"
+    # Delta is 5.6 km from here: out of reach at 100 m accuracy, in reach at 1 km.
+    assert _service().price(Fuel.DIESEL, lat=0.04, lon=0.0)["station"]["name"] == "Fake Fuel Beta"
+    assert (
+        _service().price(Fuel.DIESEL, lat=0.04, lon=0.0, accuracy_m=1000)["station"]["name"]
+        == "Fake Fuel Delta"
+    )
+
+
+def test_a_rough_position_widens_the_search_by_two_kilometres_at_most():
+    answer = _service().price(Fuel.DIESEL, lat=0.0, lon=0.0, accuracy_m=50_000)
+    assert answer["station"]["name"] == "Fake Fuel Beta"  # Delta, 10 km away, stays out of reach
+    assert answer["say"].startswith("Your position is rough. Diesel is cheapest at Fake Fuel Beta")
+
+
+def test_a_negative_accuracy_never_narrows_the_search():
+    answer = _service().price(Fuel.DIESEL, lat=0.04, lon=0.0, accuracy_m=-5000)
+    assert answer["station"]["name"] == "Fake Fuel Beta"
 
 
 def test_a_fuel_a_station_does_not_sell_is_skipped():
@@ -79,10 +94,16 @@ def test_no_station_nearby_says_so_and_names_none():
     assert answer["station"] is None
 
 
-def test_a_source_that_fails_is_said_plainly():
+def test_a_source_that_fails_is_said_plainly_with_the_next_step():
     answer = _service(FakeSource(now=NOW, failing=True)).price(Fuel.DIESEL, lat=0.0, lon=0.0)
     assert answer["success"] is False
-    assert answer["say"] == "Drivstoffpriser's data isn't available right now."
+    assert answer["say"] == "Drivstoffpriser's data isn't available right now. Try again in a few minutes."
+
+
+def test_why_a_source_failed_is_logged_without_the_position(caplog):
+    _service(FakeSource(now=NOW, failing=True)).price(Fuel.DIESEL, lat=0.0012345, lon=0.0054321)
+    assert "Drivstoffpriser: the fake was told to fail" in caplog.text
+    assert "0.0012345" not in caplog.text
 
 
 def test_the_answer_never_holds_the_position_it_was_given():

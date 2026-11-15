@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import logging
 from typing import TYPE_CHECKING, Any
 
 from fuel_mcp.geo import distance_km
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
 SEARCH_KM = 5.0
 #: The accuracy assumed when the voice gives none; the phone's precise mode reports about this.
 DEFAULT_ACCURACY_M = 100.0
+#: The most a poor position may widen the search. A network fix 50 km out would otherwise search 55 km.
+WIDEST_ACCURACY_M = 2000.0
 #: Kroner per litre a pump could show; a price outside was mistyped, in øre or with a digit too many.
 PLAUSIBLE_KR = (10.0, 40.0)
 #: How long a price may be said as today's; an older one is said with its date.
@@ -36,6 +39,9 @@ NO_SOURCE = (
 WHERE = "Where are you? Share your position, or add [home] with lat and lon to {file}."
 
 Answer = dict[str, Any]
+
+#: To stderr, which the voice never hears; stdout carries the MCP conversation.
+log = logging.getLogger("fuel_mcp")
 
 
 class FuelService:
@@ -68,11 +74,18 @@ class FuelService:
         point = (lat, lon) if lat is not None and lon is not None else self._home
         if point is None:
             return _answer(WHERE.format(file=self._config_file))
-        radius_km = SEARCH_KM + (accuracy_m if accuracy_m is not None else DEFAULT_ACCURACY_M) / 1000
+        accuracy = DEFAULT_ACCURACY_M if accuracy_m is None else accuracy_m
+        # RULE: a rough position widens the search by two kilometres at most
+        widen_m = min(max(accuracy, 0.0), WIDEST_ACCURACY_M)
+        rough = "Your position is rough. " if accuracy > WIDEST_ACCURACY_M else ""
+        radius_km = SEARCH_KM + widen_m / 1000
         try:
             prices = self._source.prices_near(point[0], point[1], radius_km, fuel)
-        except SourceUnavailableError:
-            return _answer(f"{self._source.label}'s data isn't available right now.")
+        except SourceUnavailableError as error:
+            log.warning("%s: %s", self._source.label, error)  # the reason only; never the position
+            return _answer(
+                f"{self._source.label}'s data isn't available right now. Try again in a few minutes."
+            )
         low, high = PLAUSIBLE_KR
         near = [
             (p, distance_km(point[0], point[1], p.lat, p.lon))
@@ -96,14 +109,14 @@ class FuelService:
                 f"The latest was at {name}, {spoken_price(latest.price)}, {spoken_distance(km)}, "
                 f"last reported {spoken_date(latest.updated_at, now)}."
             )
-            return _answer(say, station=_station(latest, km, current=False))
+            return _answer(rough + say, station=_station(latest, km, current=False))
         best, km = min(current, key=lambda pk: (round(pk[0].price, 2), pk[1]))
         name = spoken_name(best.name, best.brand)
         say = (
             f"{fuel.spoken} is cheapest at {name}, {spoken_price(best.price)}, {spoken_distance(km)}. "
             f"{best.source}'s price is {spoken_age(best.updated_at, now)}."
         )
-        return _answer(say, station=_station(best, km, current=True))
+        return _answer(rough + say, station=_station(best, km, current=True))
 
 
 def _station(price: StationPrice, km: float, *, current: bool) -> dict[str, Any]:
