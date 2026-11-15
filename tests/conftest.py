@@ -91,30 +91,36 @@ def start_run(temp: pathlib.Path) -> tuple[pathlib.Path, int]:
         return folder, lock
 
 
-def _ours_to_look_at(path: pathlib.Path) -> bool:
-    """A real folder of this user's, named like a run's, and not one that may be starting now."""
+def _ours_to_look_at(path: pathlib.Path) -> os.stat_result | None:
+    """What `path` is, if it is a real folder of this user's named like a run's.
+
+    None when it is not, when it may be starting now, or when another sweep removed it first.
+    """
     named, starting = NAMED.fullmatch(path.name), STARTING.fullmatch(path.name)
+    if not (named or starting):
+        return None
     try:
         found = path.lstat()
     except FileNotFoundError:
-        return False
-    return bool(
-        (named or starting)
-        and stat.S_ISDIR(found.st_mode)
-        and found.st_uid == os.getuid()
-        and not (starting and time.time() - found.st_mtime < STARTING_SECONDS)
-    )
+        return None
+    if not stat.S_ISDIR(found.st_mode) or found.st_uid != os.getuid():
+        return None
+    if starting and time.time() - found.st_mtime < STARTING_SECONDS:
+        return None
+    return found
 
 
 def _dead(path: pathlib.Path) -> bool:
     """Whether `path` is a run's folder whose run has ended: ours to look at, and unlocked."""
-    if not _ours_to_look_at(path):
+    found = _ours_to_look_at(path)
+    if found is None:
         return False
     try:
         lock = os.open(path / LOCK, OPEN_THEIR_LOCK)
     except FileNotFoundError:
-        # No lock yet: a new run's claimed name, or a run killed before it locked.
-        return time.time() - path.lstat().st_mtime >= STARTING_SECONDS
+        # No lock yet: a new run's claimed name, or a run killed before it locked. The
+        # first look's age is used: another sweep may have removed the folder since.
+        return time.time() - found.st_mtime >= STARTING_SECONDS
     except OSError:
         return False
     try:

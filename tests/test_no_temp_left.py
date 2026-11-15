@@ -226,3 +226,21 @@ def test_an_old_runs_folder_with_no_lock_is_swept(tmp_path):
     os.utime(old, (then, then))
     conftest.sweep_dead_runs(tmp_path)
     assert not old.exists()
+
+
+def test_a_folder_another_sweep_removed_first_is_passed_over(tmp_path, monkeypatch):
+    """Two runs may sweep at once; the one that comes second finds the folder already gone."""
+    import conftest  # noqa: PLC0415 - the hooks under test
+
+    gone = tmp_path / "fuel-mcp-tests-123456789012"
+    gone.mkdir()
+    real_open = conftest.os.open
+
+    def open_after_the_other_sweep(path, *args, **kwargs):
+        if gone.exists():
+            gone.rmdir()  # the other sweep removes it after this one first looked
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(conftest.os, "open", open_after_the_other_sweep)
+    conftest.sweep_dead_runs(tmp_path)  # passes over it, rather than fail the run
+    assert not gone.exists()
