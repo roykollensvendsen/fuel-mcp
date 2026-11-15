@@ -333,12 +333,34 @@ def _run(
     return subprocess.CompletedProcess(command, child.returncode, said, complained)
 
 
+def package_from_here(env: dict[str, str]) -> None:
+    """Stop unless the environment that will measure ROOT imports ROOT's own package.
+
+    Asked in a subprocess, with the environment the suite will use: this script runs a
+    branch's copy of itself in the base's environment, so it never imports the package.
+    Each copy measured is asked, the base's one-commit copy included.
+    """
+    name = PACKAGE.name
+    done = _run("uv", "run", "python", "-c", f"import {name}; print({name}.__file__)", cwd=ROOT, env=env)
+    found = Path(done.stdout.strip()).resolve() if done.returncode == 0 else None
+    own = (ROOT / "src").resolve()
+    # RULE: a measurement measures only this checkout's package
+    if found is None or not found.is_relative_to(own):
+        where = found.parent if found else "nowhere"
+        msg = (
+            f"The suite here imports {name} from {where}, not from {own}."
+            f" Run uv sync in {ROOT}, and run again."
+        )
+        raise SystemExit(msg)
+
+
 def measure(*, skip_mutation: bool = False, recorded: dict[str, Any] | None = None) -> dict[str, Any]:
     """Every measure, from the tree as it is."""
     # Whatever the suite and the mutation run leave in their temporary folder goes
     # with this one, so a measurement leaves nothing in the machine's /tmp.
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, "TMPDIR": tmp}
+        package_from_here(env)
         report = Path(tmp) / "coverage.json"
         started = time.monotonic()
         suite = _run(

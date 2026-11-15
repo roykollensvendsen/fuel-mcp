@@ -340,3 +340,22 @@ def test_a_stopped_measurement_removes_its_copy_in_a_whole_run(tmp_path, signum)
     done, left = _stop_while_measuring(tmp_path, signum)
     assert done.returncode == 128 + signum, done.stderr
     assert left == []
+
+
+def test_a_measurement_measures_only_this_checkout_s_package(monkeypatch):
+    """Asked in the environment the suite will use, never by importing it here."""
+    asked = []
+
+    def run(*command, cwd=None, env=None):
+        asked.append(command)
+        return subprocess.CompletedProcess(command, 0, "/elsewhere/src/fuel_mcp/__init__.py\n", "")
+
+    monkeypatch.setattr(ratchet, "_run", run)
+    with pytest.raises(SystemExit) as stopped:
+        ratchet.measure()
+    said = str(stopped.value.code)
+    assert "/elsewhere/src/fuel_mcp" in said
+    assert str((ratchet.ROOT / "src").resolve()) in said
+    assert f"uv sync in {ratchet.ROOT}" in said
+    assert asked == [asked[0]], "nothing is measured once the package is found elsewhere"
+    assert asked[0][:3] == ("uv", "run", "python")

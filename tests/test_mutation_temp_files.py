@@ -107,6 +107,8 @@ def _whole_run(tmp_path, monkeypatch):
     monkeypatch.setattr(mutate, "ROWS", rows)
     monkeypatch.setattr(mutate, "RECOVERY", tmp_path / "recovery.json")
     monkeypatch.setattr(mutate.sys, "argv", ["mutate.py"])
+    # A scratch project has no package of its own; the check has a test of its own.
+    monkeypatch.setattr(mutate, "package_from_here", lambda: None)
     return mutate
 
 
@@ -140,6 +142,7 @@ mutate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mutate)
 mutate.ROOT, mutate.ROWS = tmp / "project", tmp / "mutations"
 mutate.RECOVERY, mutate.MUTATE_TMP = tmp / "recovery.json", tmp / "mutate-tmp"
+mutate.package_from_here = lambda: None  # a scratch project has no package of its own
 sys.argv = ["mutate.py"]
 assert [r["file"] for r in mutate.all_rows()] == ["rule.py"], "would mutate the real tree"
 
@@ -302,3 +305,29 @@ def test_a_repair_only_run_puts_back_a_killed_run_s_file_and_does_nothing_else(t
     assert (mutate.ROOT / "rule.py").read_text() == "x = 1\n"
     assert not mutate.RECOVERY.exists()
     assert left.exists(), "nothing else: not even the sweep"
+
+
+def test_a_mutation_run_measures_only_this_checkout_s_package(tmp_path, monkeypatch):
+    """Two worktrees sharing one environment measured each other's code, and every rule went red."""
+    mutate = _mutate(tmp_path, monkeypatch)
+    said = _refused(mutate.package_from_here)
+    assert str((mutate.ROOT / "src").resolve()) in said
+    assert str((ROOT / "src").resolve()) in said, "it names where the package really comes from"
+    assert f"uv sync in {mutate.ROOT}" in said
+    monkeypatch.setattr(mutate, "ROOT", ROOT)
+    mutate.package_from_here()  # this checkout's own package: no complaint
+
+
+def test_neither_check_imports_the_package_itself():
+    """The quality check runs a branch's script in the base's environment; an import there misleads."""
+    import ast  # noqa: PLC0415
+
+    for script in ("scripts/mutate.py", "scripts/ratchet.py"):
+        tree = ast.parse((ROOT / script).read_text())
+        names = [
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import | ast.ImportFrom)
+            for alias in node.names
+        ] + [node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+        assert not [n for n in names if n.split(".")[0] == "fuel_mcp"], script

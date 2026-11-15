@@ -346,6 +346,33 @@ def _start() -> None:
     sweep()
 
 
+#: The package the suite tests. It must come from this checkout's own src/.
+PACKAGE = "fuel_mcp"
+
+
+def package_from_here() -> None:
+    """Stop the run unless the suite here imports this checkout's own package.
+
+    Two worktrees that shared one environment once measured each other's code: every rule
+    showed the same failing tests. The suite's interpreter is asked in a subprocess, so this
+    script never imports the package itself.
+    """
+    asked = f"import {PACKAGE}; print({PACKAGE}.__file__)"
+    done = subprocess.run(  # noqa: S603 - this interpreter, asked one fixed question
+        [sys.executable, "-c", asked], cwd=ROOT, capture_output=True, text=True, check=False
+    )
+    found = pathlib.Path(done.stdout.strip()).resolve() if done.returncode == 0 else None
+    own = (ROOT / "src").resolve()
+    # RULE: a mutation run measures only this checkout's package
+    if found is None or not found.is_relative_to(own):
+        where = found.parent if found else "nowhere"
+        msg = (
+            f"The suite here imports {PACKAGE} from {where}, not from {own}."
+            f" Run uv sync in {ROOT}, and run again."
+        )
+        raise SystemExit(msg)
+
+
 def one_run_per_checkout() -> int:
     """Lock the checkout for this run, without waiting; the open folder holds the lock.
 
@@ -387,6 +414,7 @@ def _every_rule(figures_to: pathlib.Path | None) -> int:
     rules = all_rows()
     if (empty := nothing_to_check(rules)) is not None:
         return empty
+    package_from_here()
     results = []
     lost: list[str] = []
     standing: tuple[pathlib.Path, str, str] | None = None

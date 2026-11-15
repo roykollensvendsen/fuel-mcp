@@ -1,0 +1,5 @@
+[[rule]]
+name = "a mutation run measures only this checkout's package"
+file = "scripts/mutate.py"
+find = '^    if found is None or not found\.is_relative_to\(own\):$'
+replace = 'if False:'

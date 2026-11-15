@@ -39,6 +39,8 @@ def _run(tmp_path, monkeypatch, red, *args):
     # Its own: the real one holds the temporary files of the mutation run this may be inside.
     monkeypatch.setattr(mutate, "MUTATE_TMP", tmp_path / "mutate-tmp")
     monkeypatch.setattr(mutate, "run_suite", lambda: (len(red), red))
+    # A scratch project has no package of its own; the check has a test of its own.
+    monkeypatch.setattr(mutate, "package_from_here", lambda: None)
     monkeypatch.setattr(sys, "argv", ["mutate.py", *args])
     return mutate.main()
 
