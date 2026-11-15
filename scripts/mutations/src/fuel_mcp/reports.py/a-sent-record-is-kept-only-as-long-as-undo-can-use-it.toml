@@ -1,0 +1,5 @@
+[[rule]]
+name = "a sent record is kept only as long as undo can use it"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*old = \[key for key in self\._sent if now - key\[1\] > UNDO_WITHIN\]$'
+replace = 'old = []'
