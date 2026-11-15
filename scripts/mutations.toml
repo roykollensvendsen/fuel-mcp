@@ -68,3 +68,9 @@ name = "a station name is read aloud only as one short line"
 file = "src/fuel_mcp/speech.py"
 find = 'if not candidate or _SENTENCE.search\(candidate\) or len\(candidate.split\(\)\) > NAME_WORDS:'
 replace = 'if not candidate:'
+
+[[rule]]
+name = "a rough position widens the search by two kilometres at most"
+file = "src/fuel_mcp/service.py"
+find = 'widen_m = min\(max\(accuracy, 0.0\), WIDEST_ACCURACY_M\)'
+replace = 'widen_m = accuracy'

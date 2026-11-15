@@ -2,8 +2,9 @@
 """Made-up stations around the made-up point 0,0, far out at sea.
 
 The fake keeps the real export's limits: some stations lack a fuel, and
-prices are hours or a day old, never fresher than the last export. Ages are
-counted back from `now`, so an example's output does not drift with the date.
+prices are hours or a day old. One is ten days old, as so much of the real
+export is. Ages are counted back from `now`, so an example's output does not
+drift with the date.
 """
 
 from __future__ import annotations
