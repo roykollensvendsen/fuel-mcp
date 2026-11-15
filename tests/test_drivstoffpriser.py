@@ -172,9 +172,9 @@ def test_the_station_list_gives_every_station_with_its_name_and_place(tmp_path):
 
 def test_a_station_list_in_a_changed_format_is_unavailable_not_a_crash(tmp_path):
     def broken(_url, _headers, _timeout=None):
-        return Response(200, {}, b'{"stations": "not a list"}')
+        return Response(200, {}, b'{"stations": [{"id": "osm_1", "name": "Made-up North"}]}')
 
-    with pytest.raises(SourceUnavailableError, match="format"):
+    with pytest.raises(SourceUnavailableError, match="station list is in a format"):
         DrivstoffpriserSource(tmp_path, fetch=broken, now=Clock()).stations()
 
 
