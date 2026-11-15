@@ -7,6 +7,8 @@ eighty-four", never "nineteen point eight four".
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
@@ -107,3 +109,35 @@ def spoken_date(moment: dt.datetime, now: dt.datetime) -> str:
     local, today = moment.astimezone(NORWAY), now.astimezone(NORWAY)
     day = f"{local.day} {_MONTHS[local.month - 1]}"
     return day if local.year == today.year else f"{day} {local.year}"
+
+
+#: The longest station name read aloud; a longer one is cut at a word.
+NAME_CHARS = 60
+#: More words than this is text, not a name.
+NAME_WORDS = 8
+#: A name holding any of these reads as a sentence or an instruction, not a place.
+_SENTENCE = re.compile(r"[!?:;]")
+
+
+def _one_line(text: str) -> str:
+    """`text` with control and invisible characters gone, on one line."""
+    kept = "".join(" " if unicodedata.category(ch) == "Cc" else ch for ch in text)
+    kept = "".join(ch for ch in kept if not unicodedata.category(ch).startswith("C"))
+    return " ".join(kept.split())
+
+
+def spoken_name(name: str, brand: str) -> str:
+    """A station's name, safe to read aloud: one short line, or the brand when the name reads as text.
+
+    Names come from community and map data, and the voice reads its answer as it
+    is, so a name is never passed on raw.
+    """
+    for candidate in (_one_line(name), _one_line(brand)):
+        # RULE: a station name is read aloud only as one short line
+        if not candidate or _SENTENCE.search(candidate) or len(candidate.split()) > NAME_WORDS:
+            continue
+        if len(candidate) <= NAME_CHARS:
+            return candidate
+        cut = candidate[:NAME_CHARS]
+        return cut.rsplit(" ", 1)[0] if " " in cut else cut
+    return "a station"
