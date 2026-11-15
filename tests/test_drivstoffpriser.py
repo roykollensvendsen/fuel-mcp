@@ -9,6 +9,7 @@ import datetime as dt
 import email.utils
 import io
 import json
+import pathlib
 import threading
 import time
 import urllib.error
@@ -411,3 +412,8 @@ def test_two_questions_at_once_to_a_healthy_host_both_get_their_answer(monkeypat
     for asker in askers:
         asker.join(5)
     assert replies == [200, 200]
+
+
+def test_the_readme_states_the_time_a_question_waits_on_the_host():
+    readme = (pathlib.Path(__file__).parent.parent / "README.md").read_text(encoding="utf-8")
+    assert f"{drivstoffpriser.BUDGET_S:g} seconds" in readme
