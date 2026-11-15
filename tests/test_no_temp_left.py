@@ -244,3 +244,28 @@ def test_a_folder_another_sweep_removed_first_is_passed_over(tmp_path, monkeypat
     monkeypatch.setattr(conftest.os, "open", open_after_the_other_sweep)
     conftest.sweep_dead_runs(tmp_path)  # passes over it, rather than fail the run
     assert not gone.exists()
+
+
+def test_a_new_run_never_takes_over_a_lock_already_there(tmp_path, monkeypatch):
+    """The lock is made new, never opened: one planted in the starting folder would be shared."""
+    import conftest  # noqa: PLC0415 - the hooks under test
+
+    planted = tmp_path / "fuel-mcp-tests-starting-planted"
+    planted.mkdir()
+    (planted / ".lock").write_text("")
+    monkeypatch.setattr(conftest.tempfile, "mkdtemp", lambda **_kwargs: str(planted))
+    with pytest.raises(FileExistsError):
+        conftest.start_run(tmp_path)
+
+
+def test_a_running_test_run_s_folder_keeps_its_lock():
+    """Pytest empties its basetemp first; the locked folder is never it, so the lock stays held."""
+    import fcntl  # noqa: PLC0415
+
+    run = pathlib.Path(os.environ["TMPDIR"])
+    lock = os.open(run / ".lock", os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        with pytest.raises(BlockingIOError):
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        os.close(lock)
