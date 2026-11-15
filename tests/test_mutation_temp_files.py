@@ -10,7 +10,10 @@ whatever a killed run left is swept away at the next start.
 
 import importlib.util
 import pathlib
+import signal
+import subprocess
 import sys
+import time
 
 import pytest
 
@@ -87,3 +90,123 @@ def test_a_passing_test_keeps_no_temporary_files():
     settings = (ROOT / "pyproject.toml").read_text()
     assert 'tmp_path_retention_policy = "failed"' in settings
     assert "tmp_path_retention_count = 1" in settings
+
+
+def _whole_run(tmp_path, monkeypatch):
+    """The runner set up for a whole run: one row on a one-line file of the tiny project."""
+    mutate = _mutate(tmp_path, monkeypatch)
+    (mutate.ROOT / "rule.py").write_text("x = 1\n")
+    rows = tmp_path / "mutations"
+    (rows / "rule.py").mkdir(parents=True)
+    (rows / "rule.py" / "a.toml").write_text(
+        "[[rule]]\nname = \"a\"\nfile = \"rule.py\"\nfind = '^x = 1$'\nreplace = 'x = 2'\n"
+    )
+    monkeypatch.setattr(mutate, "ROWS", rows)
+    monkeypatch.setattr(mutate, "RECOVERY", tmp_path / "recovery.json")
+    monkeypatch.setattr(mutate.sys, "argv", ["mutate.py"])
+    return mutate
+
+
+def test_a_finished_run_leaves_no_folder_of_its_own_behind(tmp_path, monkeypatch):
+    """Each run's files went, but the folder holding them stayed in /tmp for good."""
+    mutate = _whole_run(tmp_path, monkeypatch)
+    assert mutate.all_rows(), "the run must have a row, or it checks nothing"
+    mutate.main()
+    assert not mutate.MUTATE_TMP.exists()
+
+
+def test_an_interrupted_run_leaves_no_folder_of_its_own_behind(tmp_path, monkeypatch):
+    mutate = _whole_run(tmp_path, monkeypatch)
+
+    def interrupted():
+        mutate.MUTATE_TMP.mkdir(parents=True, exist_ok=True)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(mutate, "run_suite", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        mutate.main()
+    assert not mutate.MUTATE_TMP.exists()
+    assert (mutate.ROOT / "rule.py").read_text() == "x = 1\n"
+
+
+STOPPED_RUN = """
+import importlib.util, pathlib, sys, time
+root, tmp = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("mutate_stopped", root / "scripts/mutate.py")
+mutate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mutate)
+mutate.ROOT, mutate.ROWS = tmp / "project", tmp / "mutations"
+mutate.RECOVERY, mutate.MUTATE_TMP = tmp / "recovery.json", tmp / "mutate-tmp"
+sys.argv = ["mutate.py"]
+assert [r["file"] for r in mutate.all_rows()] == ["rule.py"], "would mutate the real tree"
+
+def held():
+    mutate.MUTATE_TMP.mkdir(parents=True, exist_ok=True)
+    (tmp / "ready").write_text("")
+    time.sleep(60)
+
+mutate.run_suite = held
+sys.exit(mutate.main())
+"""
+
+
+def _until(path, child, deadline):
+    while not path.exists() and child.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+
+@pytest.mark.parametrize("stop", [signal.SIGTERM, signal.SIGHUP], ids=["SIGTERM", "SIGHUP"])
+def test_a_stopped_run_cleans_up_as_an_interrupted_one_does(tmp_path, monkeypatch, stop):
+    """A cancelled CI job or a closed terminal stops the run by signal, and `finally` must still run."""
+    _whole_run(tmp_path, monkeypatch)
+    child = subprocess.Popen(
+        [sys.executable, "-c", STOPPED_RUN, str(ROOT), str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    _until(tmp_path / "ready", child, time.monotonic() + 30)
+    assert (tmp_path / "ready").exists(), (
+        child.communicate()[0] if child.poll() is not None else "never ready"
+    )
+    assert (tmp_path / "project/rule.py").read_text() == "x = 2\n", "the rule was switched off"
+    child.send_signal(stop)
+    out, _ = child.communicate(timeout=30)
+    assert child.returncode == 128 + stop, out
+    assert (tmp_path / "project/rule.py").read_text() == "x = 1\n"
+    assert not (tmp_path / "recovery.json").exists()
+    assert not (tmp_path / "mutate-tmp").exists()
+
+
+SLOW_CLEANUP = """
+restore = mutate.restore
+
+def slow_restore(*args):
+    (tmp / "cleaning").write_text("")
+    time.sleep(2)
+    return restore(*args)
+
+mutate.restore = slow_restore
+"""
+
+
+def test_a_second_stop_does_not_cut_the_cleanup_short(tmp_path, monkeypatch):
+    """GitHub cancels with SIGINT, then SIGTERM: the second must not cut the first one's cleanup short."""
+    _whole_run(tmp_path, monkeypatch)
+    script = STOPPED_RUN.replace("mutate.run_suite = held\n", "mutate.run_suite = held\n" + SLOW_CLEANUP)
+    child = subprocess.Popen(
+        [sys.executable, "-c", script, str(ROOT), str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    deadline = time.monotonic() + 30
+    _until(tmp_path / "ready", child, deadline)
+    child.send_signal(signal.SIGINT)
+    _until(tmp_path / "cleaning", child, deadline)
+    assert (tmp_path / "cleaning").exists(), child.communicate()[0]
+    child.send_signal(signal.SIGTERM)
+    out, _ = child.communicate(timeout=30)
+    assert (tmp_path / "project/rule.py").read_text() == "x = 1\n", out
+    assert not (tmp_path / "recovery.json").exists()
+    assert not (tmp_path / "mutate-tmp").exists()
