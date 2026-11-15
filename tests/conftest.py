@@ -16,6 +16,7 @@ shares, and set to keep nothing it removes folders other runs are still using. P
 `tests/test_no_temp_left.py`.
 """
 
+import contextlib
 import fcntl
 import os
 import pathlib
@@ -25,6 +26,8 @@ import shutil
 import socket
 import stat
 import tempfile
+import time
+from collections.abc import Callable
 
 import pytest
 
@@ -32,47 +35,97 @@ import pytest
 RUN = pytest.StashKey[tuple[pathlib.Path, int, str | None, str | None]]()
 PREFIX = "fuel-mcp-tests-"
 NAMED = re.compile(re.escape(PREFIX) + r"\d+")
+#: A run's folder is made under this name, locked, and only then given its run name, so a
+#: sweep never sees a run's name without its lock held. A run killed in between leaves one.
+STARTING = re.compile(re.escape(PREFIX) + r"starting-\w+")
+#: How old an unlocked starting folder must be before it counts as left by a killed run.
+STARTING_SECONDS = 3600
 LOCK = ".lock"
 OPEN_LOCK = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
 
 
-def _new_run_folder(temp: pathlib.Path) -> pathlib.Path:
+def _open_up(place: pathlib.Path) -> None:
+    """Give the owner back every right on one folder or file; a link is left alone."""
+    if place.is_symlink():
+        return
+    with contextlib.suppress(OSError):
+        place.chmod(place.stat().st_mode | stat.S_IRWXU)
+
+
+def _writable_again(func: Callable[[str], object], path: str, _exc: object) -> None:
+    for place in (pathlib.Path(path).parent, pathlib.Path(path)):
+        _open_up(place)
+    func(path)
+
+
+def remove(folder: pathlib.Path) -> None:
+    """Delete a run's folder, even where a test took away the rights to read or delete it.
+
+    A plain rmtree that ignores errors leaves such a folder behind without a word.
+    The way is kassalapp-mcp's.
+    """
+    for place, folders, _ in os.walk(folder):
+        for name in folders:
+            _open_up(pathlib.Path(place) / name)
+    shutil.rmtree(folder, onexc=_writable_again)
+
+
+def start_run(temp: pathlib.Path) -> tuple[pathlib.Path, int]:
+    """A new run's folder in `temp`, and the lock this run now holds on it."""
+    starting = pathlib.Path(tempfile.mkdtemp(prefix=f"{PREFIX}starting-", dir=temp))
+    lock = os.open(starting / LOCK, OPEN_LOCK, 0o600)
+    fcntl.flock(lock, fcntl.LOCK_EX)
     while True:
         folder = temp / f"{PREFIX}{secrets.randbelow(10**12):012d}"
         try:
-            folder.mkdir(mode=0o700)
+            folder.mkdir(mode=0o700)  # claims the name, so the rename cannot replace another's
         except FileExistsError:
             continue
-        return folder
+        starting.rename(folder)
+        return folder, lock
+
+
+def _ours_to_look_at(path: pathlib.Path) -> bool:
+    """A real folder of this user's, named like a run's, and not one that may be starting now."""
+    named, starting = NAMED.fullmatch(path.name), STARTING.fullmatch(path.name)
+    try:
+        found = path.lstat()
+    except FileNotFoundError:
+        return False
+    return bool(
+        (named or starting)
+        and stat.S_ISDIR(found.st_mode)
+        and found.st_uid == os.getuid()
+        and not (starting and time.time() - found.st_mtime < STARTING_SECONDS)
+    )
+
+
+def _dead(path: pathlib.Path) -> bool:
+    """Whether `path` is a run's folder whose run has ended: ours to look at, and unlocked."""
+    if not _ours_to_look_at(path):
+        return False
+    try:
+        lock = os.open(path / LOCK, OPEN_LOCK, 0o600)
+    except OSError:
+        return bool(STARTING.fullmatch(path.name))  # killed before it could lock
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False  # a run still going holds it
+    finally:
+        os.close(lock)
+    return True
 
 
 def sweep_dead_runs(temp: pathlib.Path) -> None:
-    """Remove the run folders in `temp` whose lock nobody holds: the folders of runs that died.
+    """Remove the run folders in `temp` that runs which died left; never one a run holds.
 
-    Only a real folder named like a run's, and owned by this user, is ever looked at; a link
-    is never followed.
+    Only a real folder named like a run's, and owned by this user, is ever looked at; a
+    link is never followed.
     """
     for path in temp.iterdir() if temp.is_dir() else []:
-        if not NAMED.fullmatch(path.name):
-            continue
-        try:
-            found = path.lstat()
-        except FileNotFoundError:
-            continue
-        if not stat.S_ISDIR(found.st_mode) or found.st_uid != os.getuid():
-            continue
-        try:
-            lock = os.open(path / LOCK, OPEN_LOCK, 0o600)
-        except OSError:
-            continue
-        try:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                continue  # a run still going holds it
-            shutil.rmtree(path, ignore_errors=True)
-        finally:
-            os.close(lock)
+        if _dead(path):
+            remove(path)
 
 
 @pytest.hookimpl(tryfirst=True)
@@ -82,9 +135,7 @@ def pytest_configure(config: pytest.Config) -> None:
     before, cached = os.environ.get("TMPDIR"), tempfile.tempdir  # gettempdir() fills tempdir in
     temp = pathlib.Path(tempfile.gettempdir())
     sweep_dead_runs(temp)
-    folder = _new_run_folder(temp)
-    lock = os.open(folder / LOCK, OPEN_LOCK, 0o600)
-    fcntl.flock(lock, fcntl.LOCK_EX)
+    folder, lock = start_run(temp)
     config.stash[RUN] = (folder, lock, before, cached)
     os.environ["TMPDIR"] = str(folder)
     tempfile.tempdir = str(folder)
@@ -102,7 +153,7 @@ def pytest_unconfigure(config: pytest.Config) -> None:
     else:
         os.environ["TMPDIR"] = before
     tempfile.tempdir = cached
-    shutil.rmtree(folder, ignore_errors=True)
+    remove(folder)
     os.close(lock)
 
 
