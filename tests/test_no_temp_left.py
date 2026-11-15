@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import types
 
 import pytest
@@ -131,3 +132,74 @@ def test_the_temporary_folder_is_put_back_when_the_run_ends(tmp_path, monkeypatc
     assert os.environ["TMPDIR"] == str(tmp_path)
     assert tempfile.tempdir is None
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_new_runs_folder_is_never_seen_unlocked_under_a_runs_name(tmp_path, monkeypatch):
+    """Another run sweeping just then must not take the lock between the folder and its lock."""
+    import conftest  # noqa: PLC0415 - the hooks under test
+
+    locked_while_named = []
+    real_flock = conftest.fcntl.flock
+
+    def flock(fd, how):
+        locked_while_named.append([p.name for p in tmp_path.iterdir() if conftest.NAMED.fullmatch(p.name)])
+        return real_flock(fd, how)
+
+    monkeypatch.setattr(conftest.fcntl, "flock", flock)
+    folder, lock = conftest.start_run(tmp_path)
+    try:
+        assert locked_while_named == [[]]
+        assert conftest.NAMED.fullmatch(folder.name)
+    finally:
+        os.close(lock)
+
+
+def test_a_dead_runs_folder_is_swept_even_where_a_test_shut_it(tmp_path):
+    """A folder a test made unreadable would be left silently by a plain rmtree."""
+    temp = tmp_path / "temp"
+    shut = _run_folder(temp) / "shut"
+    shut.mkdir()
+    (shut / "inside").write_text("x")
+    shut.chmod(0)
+    try:
+        done = _pytest(temp, "tests/test_speech.py")
+    finally:
+        if shut.exists():
+            shut.chmod(0o700)
+    assert done.returncode == 0, done.stdout
+    assert _files_in(temp) == []
+
+
+def _starting(temp, *, hours_old):
+    folder = temp / "fuel-mcp-tests-starting-abc"
+    folder.mkdir(parents=True)
+    (folder / "kept").write_text("a run killed while it started")
+    then = time.time() - hours_old * 3600
+    os.utime(folder, (then, then))
+    return folder
+
+
+def test_a_run_killed_while_it_started_is_swept_once_it_is_old(tmp_path):
+    temp = tmp_path / "temp"
+    _starting(temp, hours_old=2)
+    done = _pytest(temp, "tests/test_speech.py")
+    assert done.returncode == 0, done.stdout
+    assert _files_in(temp) == []
+
+
+def test_a_run_that_is_starting_now_is_left_alone(tmp_path):
+    temp = tmp_path / "temp"
+    young = _starting(temp, hours_old=0)
+    done = _pytest(temp, "tests/test_speech.py")
+    assert done.returncode == 0, done.stdout
+    assert _files_in(temp) == [f"{young.name}/kept"]
+
+
+def test_another_users_folder_is_never_swept(tmp_path, monkeypatch):
+    """A folder named like a run's but owned by someone else is theirs, whatever its lock."""
+    import conftest  # noqa: PLC0415 - the hooks under test
+
+    theirs = _run_folder(tmp_path)
+    monkeypatch.setattr(conftest.os, "getuid", lambda: theirs.lstat().st_uid + 1)
+    conftest.sweep_dead_runs(tmp_path)
+    assert (theirs / "kept").exists()
