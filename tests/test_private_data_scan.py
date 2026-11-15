@@ -77,6 +77,13 @@ def test_a_broken_private_file_refuses_the_commit_without_quoting_it(tmp_path, c
     assert "not toml" not in err
 
 
+@pytest.mark.parametrize("name", ["private.toml", "config.toml"])
+def test_a_link_to_a_moved_private_file_refuses_the_commit(tmp_path, capsys, name):
+    (tmp_path / name).symlink_to(tmp_path / "moved-away.toml")
+    assert private_data_scan.main(["--config-dir", str(tmp_path)]) == 2
+    assert str(tmp_path / name) in capsys.readouterr().err
+
+
 def test_ordinary_text_and_documentation_addresses_are_allowed():
     text = "Fake Fuel Beta, 192.0.2.10, version 1.2.3.4, 19.79 kroner, lat 0.009, 2026-11-15"
     assert private_data_scan.offences(text, set()) == []

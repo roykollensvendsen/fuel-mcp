@@ -71,8 +71,11 @@ class PrivateFileError(Exception):
 
 
 def _toml(path: pathlib.Path) -> dict[str, object]:
-    """The file's table; a missing file is empty, and a broken one refuses."""
-    if not path.exists():
+    """The file's table; a missing file is empty, and a broken one refuses.
+
+    A link whose target has moved is not a missing file: it is broken, and refuses.
+    """
+    if not os.path.lexists(path):
         return {}
     try:
         with path.open("rb") as file:
