@@ -114,6 +114,42 @@ def test_the_history_is_clean(tmp_path):
     assert _clean_run(tmp_path, "--history") == 0
 
 
+def _repo_with_a_branch(tmp_path, *, on_main):
+    """A repository whose side branch holds exact coordinates; main holds `on_main`."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = [
+        ["init", "-q", "-b", "main"],
+        ["config", "user.email", "t@example.org"],
+        ["config", "user.name", "t"],
+    ]
+    for args in git:
+        subprocess.run(["git", *args], cwd=repo, check=True)
+
+    def commit(text):
+        (repo / "notes.txt").write_text(text)
+        subprocess.run(["git", "add", "notes.txt"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "notes"], cwd=repo, check=True)
+
+    commit(on_main)
+    subprocess.run(["git", "switch", "-q", "-c", "side"], cwd=repo, check=True)
+    commit("home = " + "61.98" + "765, 7.12" + "345\n")
+    subprocess.run(["git", "switch", "-q", "main"], cwd=repo, check=True)
+    return repo
+
+
+def test_the_history_scanned_is_what_lands_on_the_branch(tmp_path, monkeypatch):
+    """A branch under review holds its own made-up numbers; main's scan must not read them."""
+    monkeypatch.setattr(private_data_scan, "ROOT", _repo_with_a_branch(tmp_path, on_main="nothing\n"))
+    assert _clean_run(tmp_path, "--history") == 0
+
+
+def test_the_branch_own_history_is_still_scanned(tmp_path, monkeypatch):
+    on_main = "home = " + "61.97" + "654, 7.23" + "456\n"
+    monkeypatch.setattr(private_data_scan, "ROOT", _repo_with_a_branch(tmp_path, on_main=on_main))
+    assert _clean_run(tmp_path, "--history") == 1
+
+
 def test_the_commit_hook_runs_the_scan_on_what_is_staged():
     hook = (ROOT / ".githooks" / "pre-commit").read_text()
     assert "private_data_scan.py" in hook

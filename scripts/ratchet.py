@@ -433,6 +433,30 @@ def base_levels(kept: Path | None, measure_base: Callable[[], dict[str, Any]]) -
     return measure_base()
 
 
+def copy_of(ref: str, copy: Path) -> None:
+    """Check `ref` out into `copy`, a repository holding that one commit and no other ref.
+
+    A worktree would share every branch of this clone, so the base's own checks, such as
+    its history scan, would read the branch under review.
+    """
+    sha = _run("git", "rev-parse", "--verify", f"{ref}^{{commit}}", cwd=ROOT)
+    if sha.returncode:
+        msg = f"Cannot find {ref} to measure it:\n{sha.stderr}"
+        raise SystemExit(msg)
+    copy.mkdir(parents=True)
+    # RULE: the base is measured where no other branch can be seen
+    steps = (
+        ("git", "init", "-q"),
+        ("git", "fetch", "-q", "--depth", "1", str(ROOT), sha.stdout.strip()),
+        ("git", "checkout", "-q", "--detach", "FETCH_HEAD"),
+    )
+    for step in steps:
+        done = _run(*step, cwd=copy)
+        if done.returncode:
+            msg = f"Cannot check out {ref} to measure it:\n{done.stderr}"
+            raise SystemExit(msg)
+
+
 def measure_at(ref: str) -> dict[str, Any]:
     """Measure `ref` in a copy of it, with this ratchet, so both sides are measured alike.
 
@@ -441,26 +465,20 @@ def measure_at(ref: str) -> dict[str, Any]:
     """
     with tempfile.TemporaryDirectory() as tmp:
         copy, out = Path(tmp) / "base", Path(tmp) / "levels.json"
-        added = _run("git", "worktree", "add", "--detach", str(copy), ref)
-        if added.returncode:
-            msg = f"Cannot check out {ref} to measure it:\n{added.stderr}"
+        copy_of(ref, copy)
+        synced = _run("uv", "sync", "--locked", "--all-extras", cwd=copy)
+        if synced.returncode:
+            msg = f"Cannot install {ref} to measure it:\n{synced.stderr[-2000:]}"
             raise SystemExit(msg)
-        try:
-            synced = _run("uv", "sync", "--locked", "--all-extras", cwd=copy)
-            if synced.returncode:
-                msg = f"Cannot install {ref} to measure it:\n{synced.stderr[-2000:]}"
-                raise SystemExit(msg)
-            # The base's own runs keep their temporary files in here too, and go with it.
-            (scratch := Path(tmp) / "tmp").mkdir()
-            env = {**os.environ, "RATCHET_ROOT": str(copy), "TMPDIR": str(scratch)}
-            here = str(Path(__file__).resolve())
-            measured = _run("uv", "run", "python", here, "measure", "--out", str(out), cwd=copy, env=env)
-            if measured.returncode:
-                msg = f"Measuring {ref} failed:\n{measured.stdout[-2000:]}{measured.stderr[-2000:]}"
-                raise SystemExit(msg)
-            return dict(json.loads(out.read_text()))
-        finally:
-            _run("git", "worktree", "remove", "--force", str(copy))
+        # The base's own runs keep their temporary files in here too, and go with it.
+        (scratch := Path(tmp) / "tmp").mkdir()
+        env = {**os.environ, "RATCHET_ROOT": str(copy), "TMPDIR": str(scratch)}
+        here = str(Path(__file__).resolve())
+        measured = _run("uv", "run", "python", here, "measure", "--out", str(out), cwd=copy, env=env)
+        if measured.returncode:
+            msg = f"Measuring {ref} failed:\n{measured.stdout[-2000:]}{measured.stderr[-2000:]}"
+            raise SystemExit(msg)
+        return dict(json.loads(out.read_text()))
 
 
 def main() -> int:
