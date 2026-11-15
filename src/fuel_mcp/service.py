@@ -115,6 +115,7 @@ class FuelService:
             return _answer(
                 f"{self._source.label}'s data isn't available right now. Try again in a few minutes."
             )
+        prices, estimates = newest_reported(prices)
         low, high = PLAUSIBLE_KR
         near = [
             (p, distance_km(point[0], point[1], p.lat, p.lon))
@@ -124,7 +125,8 @@ class FuelService:
         # RULE: a station beyond the search radius is never chosen
         near = [(p, km) for p, km in near if km <= radius_km]
         if not near:
-            return _answer(f"I can't see a {fuel.spoken.lower()} price within {round(radius_km)} kilometres.")
+            nothing = f"I can't see a {fuel.spoken.lower()} price within {round(radius_km)} kilometres."
+            return _answer(nothing + _estimate_said(estimates, point, radius_km, None))
         now = self._now()
         # A phone with a fast clock can report a price from the future; it is taken as just now.
         near = [(dataclasses.replace(p, updated_at=min(p.updated_at, now)), km) for p, km in near]
@@ -141,7 +143,8 @@ class FuelService:
         say = (
             widened
             + f"{fuel.spoken} is cheapest at {name}, {spoken_price(best.price)}, {spoken_distance(km)}. "
-            f"{best.source}'s price is {spoken_age(best.updated_at, now)}."
+            + _whose(best, now)
+            + _estimate_said(estimates, point, steps[-1], best)
         )
         return _answer(rough + say, station=_station(best, km, current=True))
 
@@ -190,6 +193,52 @@ def _first_step(
             return passed, in_step
         passed = f"Nothing within {round(step)} kilometres. "
     return None
+
+
+def newest_reported(prices: list[StationPrice]) -> tuple[list[StationPrice], list[StationPrice]]:
+    """The newest reported price for each station and fuel, and apart from them, the estimates.
+
+    A source's price and the owner's own report for one station are compared by time alone.
+    """
+    newest: dict[tuple[str, Fuel], StationPrice] = {}
+    estimates = []
+    for p in prices:
+        # RULE: an estimate is never chosen over a reported price
+        if p.estimate:
+            estimates.append(p)
+            continue
+        key = (p.station_id, p.fuel)
+        # RULE: the newest price for a station wins whichever it comes from
+        if key not in newest or p.updated_at > newest[key].updated_at:
+            newest[key] = p
+    return list(newest.values()), estimates
+
+
+def _whose(best: StationPrice, now: dt.datetime) -> str:
+    """Whose price it is, and how old: the owner's own report is never said as the source's."""
+    age = spoken_age(best.updated_at, now)
+    # RULE: an own report is said as the owner's own with its age
+    if best.own:
+        return f"That's your own report, {age}."
+    return f"{best.source}'s price is {age}."
+
+
+def _estimate_said(
+    estimates: list[StationPrice], point: tuple[float, float], radius_km: float, best: StationPrice | None
+) -> str:
+    """A cheaper estimate within reach, said apart and named as one; never hidden, never chosen."""
+    low, high = PLAUSIBLE_KR
+    near = [
+        p
+        for p in estimates
+        if low <= p.price <= high and distance_km(point[0], point[1], p.lat, p.lon) <= radius_km
+    ]
+    cheaper = [p for p in near if best is None or round(p.price, 2) < round(best.price, 2)]
+    if not cheaper:
+        return ""
+    guess = min(cheaper, key=lambda p: p.price)
+    name = spoken_name(guess.name, guess.brand)
+    return f" {guess.source}'s estimate at {name} is {spoken_price(guess.price)}."
 
 
 def _station(price: StationPrice, km: float, *, current: bool) -> dict[str, Any]:

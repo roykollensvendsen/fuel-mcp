@@ -1,0 +1,5 @@
+[[rule]]
+name = "only narrows the services and never widens them"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*if stray:$'
+replace = 'if False:'

@@ -1,0 +1,5 @@
+[[rule]]
+name = "an estimate is never chosen over a reported price"
+file = "src/fuel_mcp/service.py"
+find = '^\s*if p\.estimate:$'
+replace = 'if False:'

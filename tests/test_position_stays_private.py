@@ -10,6 +10,7 @@ read: a write to a fixed path outside it would not be seen.
 
 import asyncio
 import dataclasses
+import datetime as dt
 import json
 import logging
 import tempfile
@@ -17,8 +18,11 @@ import tempfile
 import pytest
 from test_drivstoffpriser import NOW, PRICES, STATIONS, Clock, Host
 
+from fuel_mcp.reports import OwnReports, Reporter
 from fuel_mcp.server import build_server
 from fuel_mcp.service import FuelService
+from fuel_mcp.sinks import Sinks
+from fuel_mcp.sinks.local import LocalSink
 from fuel_mcp.sources.drivstoffpriser import DrivstoffpriserSource
 
 #: A position whose rounded forms are distinctive too, which a point near 0,0 is not. It is out
@@ -76,6 +80,55 @@ def _ask(folder, host):
     server = build_server(FuelService(source, now=lambda: NOW))
     result = asyncio.run(server.call_tool("fuel_price", {"lat": LAT, "lon": LON, "accuracy_m": 30}))
     return result.structured_content
+
+
+class _Sender:
+    """A private sender that writes all it is given into the test's folder, to be read for the position."""
+
+    label = "Service Made Up"
+    needs_yes = True
+
+    def __init__(self, folder):
+        self._file = folder / "sent.txt"
+
+    def take(self, report):
+        with self._file.open("a", encoding="utf-8") as file:
+            file.write(f"{report!r}\n")
+
+
+def _report(folder, host):
+    """A report said with the position, sent on after a yes, then a price question that hears it."""
+    source = DrivstoffpriserSource(folder / "cache", fetch=host, now=Clock())
+    local = LocalSink(folder / "state" / "fuel-mcp", keep=dt.timedelta(hours=12))
+    own = OwnReports(source, local, source, counts_for=dt.timedelta(hours=12), now=lambda: NOW)
+    reporter = Reporter(source, Sinks(local, [_Sender(folder)]), now=lambda: NOW)
+    server = build_server(FuelService(own, now=lambda: NOW), reporter)
+    where = {"lat": LAT, "lon": LON, "accuracy_m": 30}
+    asked = _call(server, "fuel_report", {"price": 19.5, "station": "made-up north", **where})
+    sent = _call(server, "fuel_report_confirm", {"token": asked["token"]})
+    return [asked, sent, _call(server, "fuel_price", where)]
+
+
+def _call(server, tool, arguments):
+    return asyncio.run(server.call_tool(tool, arguments)).structured_content
+
+
+def test_no_file_written_after_a_report_and_its_send_holds_the_position(folder, caplog, capsys):
+    caplog.set_level(logging.DEBUG)
+    asked, sent, price = _report(folder, _HostNearby())
+    assert asked["success"], asked["say"]  # the report was really saved, so a leak would be seen
+    assert sent["say"] == "Sent to Service Made Up."
+    assert "your own report" in price["say"]
+    files = _written(folder)
+    assert {"sent.txt", "state/fuel-mcp/own-reports.jsonl"} <= set(files)  # both were written
+    for name, body in files.items():
+        for form in WRITTEN:
+            assert form.encode() not in body, f"{name} holds the position as {form}"
+            assert form not in name, f"a file is named by the position: {name}"
+    printed = capsys.readouterr()
+    for form in WRITTEN:
+        assert form not in caplog.text
+        assert form not in printed.out + printed.err
 
 
 def _written(folder):

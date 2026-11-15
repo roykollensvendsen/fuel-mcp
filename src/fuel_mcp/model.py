@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import datetime as dt
@@ -46,6 +46,21 @@ class StationPrice:
     #: The source's name as it is said: "Drivstoffpriser".
     source: str
     report_count: int = 1
+    #: True: the owner reported it himself, on this machine.
+    own: bool = False
+    #: True: the source's estimate for a station nobody reported, never a reported price.
+    estimate: bool = False
+
+
+@dataclass(frozen=True)
+class Station:
+    """A station from a source's station list, with or without a price."""
+
+    station_id: str
+    name: str
+    brand: str
+    lat: float
+    lon: float
 
 
 class SourceUnavailableError(Exception):
@@ -60,6 +75,18 @@ class PriceSource(Protocol):
 
     def prices_near(self, lat: float, lon: float, radius_km: float, fuel: Fuel) -> list[StationPrice]:
         """Every price for `fuel` within `radius_km` of the point; raises SourceUnavailableError."""
+        ...
+
+
+@runtime_checkable
+class StationList(Protocol):
+    """A source that also lists its stations, priced or not, so a report can name one.
+
+    A protocol of its own, so a source without a station list still fits `PriceSource`.
+    """
+
+    def stations(self) -> list[Station]:
+        """Every station the source knows; raises SourceUnavailableError."""
         ...
 
 

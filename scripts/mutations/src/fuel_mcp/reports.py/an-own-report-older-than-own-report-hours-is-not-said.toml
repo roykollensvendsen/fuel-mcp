@@ -1,0 +1,5 @@
+[[rule]]
+name = "an own report older than own_report_hours is not said"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*counting = \[r for r in reports if now - r\.reported_at <= self\._counts_for\]$'
+replace = 'counting = reports'

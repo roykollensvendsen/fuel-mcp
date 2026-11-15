@@ -67,6 +67,19 @@ class LocalSink:
         kept = self._kept(now)
         return [r for r in kept if r.fuel == fuel]
 
+    def forget_latest(self, now: dt.datetime, within: dt.timedelta) -> OwnReport | None:
+        """Remove the newest report, if it is from within `within`; the one removed, or None.
+
+        Raises SinkRefusedError when the file can't be written.
+        """
+        kept = self._kept(now)
+        latest = max(kept, key=lambda r: r.reported_at, default=None)
+        # RULE: undo removes only the latest own report and only within 10 minutes
+        if latest is None or now - latest.reported_at > within:
+            return None
+        self._write([r for r in kept if r is not latest])
+        return latest
+
     def _kept(self, now: dt.datetime) -> list[OwnReport]:
         """The reports still inside the keep time; the file is rewritten when some have gone."""
         everything = self._read()

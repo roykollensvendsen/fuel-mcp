@@ -307,3 +307,22 @@ def test_a_private_sink_entry_of_the_wrong_shape_names_the_fix(tmp_path, text):
 def test_the_state_folder_follows_xdg():
     assert state_folder({"XDG_STATE_HOME": "/st"}) == pathlib.Path("/st/fuel-mcp")
     assert state_folder({"HOME": "/h"}) == pathlib.Path("/h/.local/state/fuel-mcp")
+
+
+def test_the_send_time_limit_and_the_owner_s_station_names_are_read(tmp_path):
+    defaults = load_settings(tmp_path / "nothing-here")
+    assert (defaults.send_timeout_s, dict(defaults.station_names)) == (15.0, {})
+    chosen = load_settings(_config(tmp_path, 'send_timeout_s = 5\n[station_names]\n"my usual" = "osm_1"\n'))
+    assert (chosen.send_timeout_s, dict(chosen.station_names)) == (5.0, {"my usual": "osm_1"})
+
+
+@pytest.mark.parametrize("line", ["send_timeout_s = 0", "send_timeout_s = 61", 'send_timeout_s = "5"'])
+def test_a_send_time_limit_outside_1_to_60_seconds_names_the_fix(tmp_path, line):
+    with pytest.raises(SettingsError, match="send_timeout_s must be a number from 1 to 60"):
+        load_settings(_config(tmp_path, line + "\n"))
+
+
+@pytest.mark.parametrize("table", ["[station_names]\nusual = 3\n", 'station_names = "usual"\n'])
+def test_station_names_must_map_a_name_to_a_station_id(tmp_path, table):
+    with pytest.raises(SettingsError, match=r'\[station_names\] .* "my usual" = "<station id>"'):
+        load_settings(_config(tmp_path, table))

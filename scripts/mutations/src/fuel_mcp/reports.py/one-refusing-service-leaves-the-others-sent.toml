@@ -1,0 +1,5 @@
+[[rule]]
+name = "one refusing service leaves the others sent"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*except SinkRefusedError as refused:$'
+replace = 'except ZeroDivisionError as refused:'

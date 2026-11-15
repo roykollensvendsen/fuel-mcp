@@ -1,0 +1,5 @@
+[[rule]]
+name = "several candidate stations save nothing until one is named"
+file = "src/fuel_mcp/reports.py"
+find = '^\s*if len\(matches\) > 1:$'
+replace = 'if False:'

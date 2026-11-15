@@ -62,7 +62,7 @@ TALLY = re.compile(r"(\d+)/(\d+) rules turned off")
 CORE = {
     "model", "geo", "speech", "settings", "service",
     "simulator", "__init__", "_version", "sources",
-    "safe_file", "sinks", "sinks.local",
+    "safe_file", "sinks", "sinks.local", "reports",
 }  # fmt: skip
 TOP = {"server", "cli"}
 #: Which layers each layer may import from this package, and the outside packages it never may.
