@@ -242,6 +242,36 @@ def run_suite() -> tuple[int, list[str]]:
     return int(m.group(1)) if m else 0, [f.split("::")[-1].split("[")[0] for f in failed]
 
 
+#: A rule's mark in the code: ``# RULE: what it says``.
+MARKER = re.compile(r"^[ \t]*#\s*RULE:\s*(.+?)\s*$")
+
+
+def marked() -> list[str]:
+    """Every rule the code marks, in src/ and in the scripts, by its words."""
+    sources = [*(ROOT / "src").rglob("*.py"), *(p for p in (ROOT / "scripts").glob("*.py") if p.is_file())]
+    lines = [line for source in sorted(sources) for line in source.read_text(encoding="utf-8").splitlines()]
+    return [match.group(1) for line in lines if (match := MARKER.search(line))]
+
+
+def nothing_to_check(rules: list[dict[str, Any]]) -> int | None:
+    """The exit code when there are no rows to run, or None when there are."""
+    # RULE: an empty rule table is not a crash
+    # A scaffolded repository starts with no rules and no rows.
+    if not rules and not marked():
+        print(f"no rules in {ROWS.relative_to(ROOT)} yet; add one file per rule the code enforces")  # noqa: T201
+        return 0
+    # RULE: rules with no rows are a failure not a pass
+    # A check that passes with nothing to check is fail-open: a folder moved or
+    # emptied by mistake would leave every rule unproven and the run green.
+    if not rules:
+        print(  # noqa: T201
+            f"nothing to switch off: the code marks rules, but {ROWS.relative_to(ROOT)} has no rows."
+            " Restore it from main (git checkout origin/main -- scripts/mutations), or add a row per rule."
+        )
+        return 1
+    return None
+
+
 def main() -> int:
     """Mutate every rule in turn, restore the tree, and report."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -250,12 +280,9 @@ def main() -> int:
 
     repair()
     sweep()
-    # RULE: an empty rule table is not a crash
-    # A scaffolded repository starts with a table of comments and no rows.
     rules = all_rows()
-    if not rules:
-        print(f"no rules in {ROWS.relative_to(ROOT)} yet; add one file per rule the code enforces")  # noqa: T201
-        return 0
+    if (empty := nothing_to_check(rules)) is not None:
+        return empty
     results = []
     lost: list[str] = []
     standing: tuple[pathlib.Path, str, str] | None = None

@@ -68,15 +68,30 @@ def test_a_coloured_failure_line_is_still_attributed(monkeypatch, mutate):
     assert mutate.run_suite() == (1, ["test_a_token_works_once"])
 
 
-def test_an_empty_rule_table_is_not_a_crash(tmp_path, monkeypatch, mutate, capsys):
-    """A new repository has no rules yet; the run says what to add and passes."""
+def _scaffold(tmp_path, monkeypatch, mutate, source):
+    """A repository in `tmp_path` holding `source` as its only code, and no rows."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/code.py").write_text(source, encoding="utf-8")
+    monkeypatch.setattr(mutate, "ROOT", tmp_path)
+    monkeypatch.setattr(mutate, "ROWS", tmp_path / "scripts/mutations")
     # main() first repairs what a killed run left. Inside a mutation run the real record
     # names the file switched off now, so it would be put back mid-run: use one of its own.
     monkeypatch.setattr(mutate, "RECOVERY", tmp_path / "recovery.json")
-    monkeypatch.setattr(mutate, "all_rows", lambda _folder=None: [])
     monkeypatch.setattr(mutate.sys, "argv", ["mutate.py"])
+
+
+def test_an_empty_rule_table_is_not_a_crash(tmp_path, monkeypatch, mutate, capsys):
+    """A new repository has no rules and no rows yet; the run says what to add and passes."""
+    _scaffold(tmp_path, monkeypatch, mutate, "x = 1\n")
     assert mutate.main() == 0
     assert "add one file per rule" in capsys.readouterr().out
+
+
+def test_rules_with_no_rows_are_a_failure_not_a_pass(tmp_path, monkeypatch, mutate, capsys):
+    """A rows folder moved or emptied by mistake would leave every rule unproven, and the run green."""
+    _scaffold(tmp_path, monkeypatch, mutate, "# RULE: something is kept\nx = 1\n")
+    assert mutate.main() == 1
+    assert "git checkout origin/main -- scripts/mutations" in capsys.readouterr().out
 
 
 #: The function a killed run repairs with. A rule there would be switched off while it repairs.
@@ -97,13 +112,24 @@ def sweep():
 
 
 def _inside_repair(text, rows, mutate):
-    """The rules marked, or switched off by a row, inside `repair()` in `text`."""
+    """The rules marked, or switched off by a row, in `repair()` or any function of `text` it calls."""
     import ast  # noqa: PLC0415
 
-    body = next(f for f in ast.parse(text).body if isinstance(f, ast.FunctionDef) and f.name == UNPROVABLE)
+    functions = {f.name: f for f in ast.parse(text).body if isinstance(f, ast.FunctionDef)}
+    assert UNPROVABLE in functions, (
+        f"no {UNPROVABLE}() in the runner; if it was renamed, rename UNPROVABLE too"
+    )
+    reached, waiting = set(), [UNPROVABLE]
+    while waiting:  # repair() and everything it calls, however deep, within this file
+        name = waiting.pop()
+        reached.add(name)
+        calls = [
+            c for c in ast.walk(functions[name]) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+        ]
+        waiting += [c for c in {c.func.id for c in calls} if c in functions and c not in reached]
     lines = text.splitlines()
-    inside = range(body.lineno - 1, body.end_lineno)
-    marked = [lines[i].split("# RULE:")[1].strip() for i in inside if "# RULE:" in lines[i]]
+    inside = {i for name in reached for i in range(functions[name].lineno - 1, functions[name].end_lineno)}
+    marked = [lines[i].split("# RULE:")[1].strip() for i in sorted(inside) if "# RULE:" in lines[i]]
     rowed = [
         r["name"] for r in rows if mutate.line_of(text, r["find"], int(r.get("occurrence", 1))) in inside
     ]
@@ -117,6 +143,28 @@ def test_a_rule_inside_repair_is_found(mutate):
         {"name": "kept", "find": r"if kept:"},
     ]
     assert _inside_repair(REPAIR_WITH_A_RULE, rows, mutate) == ["a repaired file is the original", "kept"]
+
+
+REPAIR_CALLING_A_RULE = """
+def write(kept):
+    # RULE: a repaired file is written whole
+    path.write_text(kept)
+
+
+def repair():
+    write(kept)
+"""
+
+
+def test_a_rule_in_what_repair_calls_is_found(mutate):
+    """A helper repair() calls runs switched off too, so its rule cannot be proven either."""
+    assert _inside_repair(REPAIR_CALLING_A_RULE, [], mutate) == ["a repaired file is written whole"]
+
+
+def test_a_runner_with_no_repair_is_refused_by_name(mutate):
+    """Renamed, repair() would leave the guard checking nothing; it says what it looked for."""
+    with pytest.raises(AssertionError, match=r"no repair\(\) in"):
+        _inside_repair("def mend():\n    pass\n", [], mutate)
 
 
 def test_no_rule_lives_inside_repair(mutate):
