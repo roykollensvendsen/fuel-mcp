@@ -45,3 +45,9 @@ def test_the_manifest_starts_the_server_the_readme_names():
         "uv",
         ["run", "fuel-mcp", "serve"],
     )
+
+
+def test_every_send_ends_before_the_voice_gives_up_on_the_tool():
+    from fuel_mcp.settings import SEND_TIMEOUT_LIMITS  # noqa: PLC0415 - the one test that needs it
+
+    assert SEND_TIMEOUT_LIMITS[1] < _manifest()["timeout"]
