@@ -258,8 +258,11 @@ def test_a_new_run_never_takes_over_a_lock_already_there(tmp_path, monkeypatch):
         conftest.start_run(tmp_path)
 
 
-def test_a_running_test_run_s_folder_keeps_its_lock():
-    """Pytest empties its basetemp first; the locked folder is never it, so the lock stays held."""
+def test_a_running_test_run_s_folder_keeps_its_lock(tmp_path):
+    """Pytest empties its basetemp first; the locked folder is never it, so the lock stays held.
+
+    `tmp_path` is asked for so that pytest has made its basetemp by now.
+    """
     import fcntl  # noqa: PLC0415
 
     run = pathlib.Path(os.environ["TMPDIR"])
