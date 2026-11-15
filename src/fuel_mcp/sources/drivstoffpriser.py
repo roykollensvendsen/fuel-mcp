@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -28,14 +29,18 @@ if TYPE_CHECKING:
 BASE_URL = "https://drivstoffpriser.github.io/Drivstoffpriser-App/data/"
 FILES = ("stations.json", "prices.json")
 CHECK_EVERY = dt.timedelta(hours=1)
-#: After a failed check the host is left alone this long, and the copy answers at once.
+#: After a timeout or a lost network the host is left alone this long, and the copy answers at once.
 RETRY_AFTER = dt.timedelta(minutes=10)
-#: Seconds to wait on the host. A failure stops the rest of the question's asks, so the
-#: voice, which gives up after about 15 s, waits for at most one of these.
-TIMEOUT_S = 5
-#: When the host last failed, kept beside the copy so a restart does not ask again at once.
-FAILED_AT = "host-failed-at"
-NOT_MODIFIED, OK = 304, 200
+#: A host that says it is busy (429) or broken (5xx) is left alone an hour, or as long as it asks.
+BUSY_QUIET = CHECK_EVERY
+#: The longest a Retry-After is honoured, so a typo in it cannot silence the host for good.
+LONGEST_QUIET = dt.timedelta(days=1)
+#: Seconds one question may wait on the host, both files together. The voice gives up near 15.
+BUDGET_S = 8.0
+#: Until when the host is left alone, kept beside the copy so a restart does not ask again at once.
+QUIET_UNTIL = "host-quiet-until"
+NOT_MODIFIED, OK, TOO_MANY, SERVER_ERROR = 304, 200, 429, 500
+_CHUNK = 64 * 1024
 #: A generic name: the request says which program asks, never who.
 USER_AGENT = "fuel-mcp"
 #: Each header a check sends, and the tag it sends back.
@@ -51,16 +56,21 @@ class Response:
     body: bytes
 
 
-def urllib_fetch(url: str, headers: Mapping[str, str]) -> Response:
-    """One GET with `headers`; a 304 is an answer, not an error."""
+def urllib_fetch(url: str, headers: Mapping[str, str], timeout: float) -> Response:
+    """One GET with `headers`, finished within `timeout` seconds in all; an HTTP status is an answer."""
     request = urllib.request.Request(url, headers={**headers, "User-Agent": USER_AGENT})  # noqa: S310
+    deadline = time.monotonic() + timeout
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as reply:  # noqa: S310 - a fixed https URL
-            return Response(reply.status, dict(reply.headers), reply.read())
+        with urllib.request.urlopen(request, timeout=timeout) as reply:  # noqa: S310 - a fixed https URL
+            body = bytearray()
+            while chunk := reply.read(_CHUNK):
+                body += chunk
+                if time.monotonic() > deadline:
+                    msg = f"the body took more than {timeout:.1f} s"
+                    raise TimeoutError(msg)
+            return Response(reply.status, dict(reply.headers), bytes(body))
     except urllib.error.HTTPError as error:
-        if error.code == NOT_MODIFIED:
-            return Response(NOT_MODIFIED, dict(error.headers or {}), b"")
-        raise
+        return Response(error.code, dict(error.headers or {}), b"")
 
 
 class DrivstoffpriserSource:
@@ -72,16 +82,20 @@ class DrivstoffpriserSource:
         self,
         cache: pathlib.Path,
         *,
-        fetch: Callable[[str, Mapping[str, str]], Response] = urllib_fetch,
+        fetch: Callable[[str, Mapping[str, str], float], Response] = urllib_fetch,
         now: Callable[[], dt.datetime] | None = None,
+        elapsed: Callable[[], float] = time.monotonic,
     ) -> None:
-        """`fetch` and `now` are replaced in tests; the real ones reach the network and the clock."""
+        """`fetch`, `now` and `elapsed` are replaced in tests; the real ones use the network and clocks."""
         self._cache = cache
         self._fetch = fetch
         self._now = now or (lambda: dt.datetime.now(dt.UTC))
+        self._elapsed = elapsed
+        self._deadline = 0.0
 
     def prices_near(self, lat: float, lon: float, radius_km: float, fuel: Fuel) -> list[StationPrice]:
         """Every price for `fuel` within `radius_km` of the point."""
+        self._deadline = self._elapsed() + BUDGET_S
         stations, prices = (self._file(name) for name in FILES)
         return [
             p
@@ -100,20 +114,33 @@ class DrivstoffpriserSource:
             return copy.read_bytes()
         # RULE: a failing host is not asked again for ten minutes
         if self._failed_recently(now):
-            return self._copy_or_unavailable(name, meta, "the host failed a few minutes ago")
+            return self._copy_or_unavailable(
+                name, meta, "is not asked for: the host failed a short while ago"
+            )
+        return self._ask(now, name, meta)
+
+    def _ask(self, now: dt.datetime, name: str, meta: dict[str, str]) -> bytes:
+        """Ask the host for the file, within what is left of the question's time."""
+        copy, tags = self._cache / name, self._cache / f"{name}.tags.json"
+        left = self._deadline - self._elapsed()
+        if left <= 0:
+            return self._failed(now, name, meta, "was not asked for: the host was too slow", RETRY_AFTER)
         # RULE: a check sends back the tag from the last answer
         ask = {header: meta[key] for header, key in CONDITIONAL if key in meta}
         try:
-            reply = self._fetch(BASE_URL + name, ask)
+            reply = self._fetch(BASE_URL + name, ask, left)
         except OSError as error:  # URLError and timeouts are OSErrors too
-            return self._failed(now, name, meta, f"could not be fetched: {error}")
+            return self._failed(now, name, meta, f"could not be fetched: {error}", RETRY_AFTER)
         if reply.status == NOT_MODIFIED and meta:
             meta["checked_at"] = now.isoformat()
             tags.write_text(json.dumps(meta), encoding="utf-8")
             self._recovered()
             return copy.read_bytes()
         if reply.status != OK:
-            return self._failed(now, name, meta, f"answered {reply.status}")
+            quiet = (
+                _quiet_for(reply) if reply.status == TOO_MANY or reply.status >= SERVER_ERROR else RETRY_AFTER
+            )
+            return self._failed(now, name, meta, f"answered {reply.status}", quiet)
         return self._store(now, name, meta, reply)
 
     def _store(self, now: dt.datetime, name: str, meta: dict[str, str], reply: Response) -> bytes:
@@ -122,7 +149,8 @@ class DrivstoffpriserSource:
         try:
             _records(reply.body, name.removesuffix(".json"))
         except (KeyError, TypeError, ValueError) as error:
-            return self._failed(now, name, meta, f"came in a format this version does not know: {error!r}")
+            why = f"came in a format this version does not know: {error!r}"
+            return self._failed(now, name, meta, why, RETRY_AFTER)
         headers = {k.lower(): v for k, v in reply.headers.items()}
         self._cache.mkdir(parents=True, exist_ok=True)
         copy.write_bytes(reply.body)
@@ -137,28 +165,37 @@ class DrivstoffpriserSource:
         return reply.body
 
     def _failed_recently(self, now: dt.datetime) -> bool:
-        marker = self._cache / FAILED_AT
+        marker = self._cache / QUIET_UNTIL
         if not marker.is_file():
             return False
         try:
-            return now - dt.datetime.fromisoformat(marker.read_text(encoding="utf-8").strip()) < RETRY_AFTER
+            return now < dt.datetime.fromisoformat(marker.read_text(encoding="utf-8").strip())
         except ValueError:
             return False
 
-    def _failed(self, now: dt.datetime, name: str, meta: dict[str, str], why: str) -> bytes:
-        """Note the failure, so the host is left alone for a while, then answer from the copy."""
+    def _failed(
+        self, now: dt.datetime, name: str, meta: dict[str, str], why: str, quiet: dt.timedelta
+    ) -> bytes:
+        """Note the failure, so the host is left alone for `quiet`, then answer from the copy."""
         self._cache.mkdir(parents=True, exist_ok=True)
-        (self._cache / FAILED_AT).write_text(now.isoformat(), encoding="utf-8")
+        (self._cache / QUIET_UNTIL).write_text((now + quiet).isoformat(), encoding="utf-8")
         return self._copy_or_unavailable(name, meta, why)
 
     def _recovered(self) -> None:
-        (self._cache / FAILED_AT).unlink(missing_ok=True)
+        (self._cache / QUIET_UNTIL).unlink(missing_ok=True)
 
     def _copy_or_unavailable(self, name: str, meta: dict[str, str], why: str) -> bytes:
         if meta:
             return (self._cache / name).read_bytes()
         msg = f"{name} {why}, and there is no copy"
         raise SourceUnavailableError(msg)
+
+
+def _quiet_for(reply: Response) -> dt.timedelta:
+    """How long a busy or broken host is left alone: an hour, or longer if its Retry-After asks."""
+    asked = {k.lower(): v for k, v in reply.headers.items()}.get("retry-after", "").strip()
+    seconds = int(asked) if asked.isdigit() else 0
+    return min(max(BUSY_QUIET, dt.timedelta(seconds=seconds)), LONGEST_QUIET)
 
 
 def _tags(path: pathlib.Path) -> dict[str, str]:
