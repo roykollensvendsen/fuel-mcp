@@ -310,7 +310,7 @@ def _run(
 
     The wait after that Ctrl-C has no time limit, on purpose: these runs are never cut
     short. Should the command hang there, end it and its group with
-    kill -9 -- -<its pid>; the next rule check then puts its file back.
+    kill -9 -- -<its pid>, which this script prints; the next rule check then puts its file back.
     """
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         child = subprocess.Popen(  # noqa: S603 - the commands are this script's own
@@ -329,6 +329,10 @@ def _run(
             with contextlib.suppress(ProcessLookupError):
                 # RULE: a stopped measurement stops its step and waits for it
                 os.killpg(child.pid, signal.SIGINT)
+            sys.stderr.write(
+                f"Stopping: waiting for {command[0]} to clean up. If it hangs, end it from"
+                f" another terminal with: kill -9 -- -{child.pid}\n"
+            )
             child.wait()
             raise
         out.seek(0)

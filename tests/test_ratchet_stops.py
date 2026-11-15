@@ -23,6 +23,7 @@ import os, pathlib, signal, sys, time
 marks = pathlib.Path(sys.argv[1])
 stops = []
 signal.signal(signal.SIGINT, lambda signum, _frame: stops.append(signum))
+(marks / "pid").write_text(str(os.getpid()))
 (marks / "own-session").write_text(str(os.getsid(0) == os.getpid()))
 (marks / "ready").write_text("")
 if sys.argv[2] == "orphan":
@@ -61,7 +62,7 @@ def _ratchet(tmp_path, mode="stop", *, own_group=False):
         [sys.executable, "-c", RATCHET, str(ROOT / "scripts/ratchet.py"), CHILD, str(marks), mode],
         env={**os.environ, "TMPDIR": str(temp)},
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=(tmp_path / "said").open("w"),
         start_new_session=own_group,
     )
     _until(marks / "ready", 30)
@@ -152,3 +153,12 @@ def test_a_step_already_gone_when_the_stop_comes_is_not_an_error(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         ratchet._run("true")  # noqa: SLF001 - the step runner under test
     assert Gone.waits == 2, "it still waits for the step"
+
+
+def test_a_stopped_measurement_names_the_kill_for_a_step_that_hangs(tmp_path):
+    """The wait for the step has no time limit, so the way out is said where the stop was given."""
+    ratchet, _, marks = _ratchet(tmp_path)
+    ratchet.send_signal(signal.SIGINT)
+    _ended(ratchet)
+    said = (tmp_path / "said").read_text()
+    assert f"kill -9 -- -{(marks / 'pid').read_text()}" in said, said
