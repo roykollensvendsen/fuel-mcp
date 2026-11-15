@@ -11,6 +11,10 @@ when it ends. A killed run never gets that far, so the next run removes any such
 whose lock nobody holds. The lock, not a process number, tells a live run: a sandbox has
 process numbers of its own, and they are reused.
 
+This is design A of the cleanup checklist, the starting name: a run's folder is made
+under a starting name, its lock is made new and taken, and only then is it renamed to
+a run's name. pytest's own basetemp is a folder inside it, never the locked folder.
+
 pytest's own sweep is not used for this: it works on a folder every project on the machine
 shares, and set to keep nothing it removes folders other runs are still using. Proven by
 `tests/test_no_temp_left.py`.
@@ -44,7 +48,7 @@ STARTING = re.compile(re.escape(PREFIX) + r"starting-\w+")
 #: and nothing measured says how long a run killed while starting may sit before then.
 STARTING_SECONDS = 3600
 LOCK = ".lock"
-OPEN_LOCK = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
+OPEN_LOCK = os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
 #: A sweep only opens a lock that is there: one it made would sit in a new run's folder
 #: before that run moves in, and the run's rename onto it would then fail.
 OPEN_THEIR_LOCK = os.O_RDWR | os.O_NOFOLLOW
