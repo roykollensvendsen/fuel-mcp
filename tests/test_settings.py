@@ -186,17 +186,31 @@ def test_the_farthest_search_and_the_old_price_limit_are_read_from_the_config(tm
 
 
 @pytest.mark.parametrize(
-    ("line", "key"),
+    ("line", "key", "fix"),
     [
-        ("farthest_km = 0", "farthest_km"),
-        ('farthest_km = "far"', "farthest_km"),
-        ("farthest_km = true", "farthest_km"),
-        ("old_after_days = -1", "old_after_days"),
-        ("old_after_days = 2.5", "old_after_days"),
+        ("farthest_km = 0", "farthest_km", "a number from 1 to 100"),
+        ('farthest_km = "far"', "farthest_km", "a number from 1 to 100"),
+        ("farthest_km = true", "farthest_km", "a number from 1 to 100"),
+        ("farthest_km = inf", "farthest_km", "a number from 1 to 100"),
+        ("farthest_km = nan", "farthest_km", "a number from 1 to 100"),
+        ("farthest_km = 101", "farthest_km", "a number from 1 to 100"),
+        ("old_after_days = 6", "old_after_days", "a whole number from 7 to 3650"),
+        ("old_after_days = -1", "old_after_days", "a whole number from 7 to 3650"),
+        ("old_after_days = 2.5", "old_after_days", "a whole number from 7 to 3650"),
     ],
 )
-def test_a_search_setting_that_is_not_a_positive_number_names_the_fix_and_the_file(tmp_path, line, key):
-    with pytest.raises(SettingsError, match=rf"{key} must be a whole number|{key} must be a number"):
+def test_a_search_setting_outside_its_limits_names_the_fix_and_the_file(tmp_path, line, key, fix):
+    # A farthest_km of inf would step out for ever, and nan matches no station. An old limit under
+    # a week would never call a price old, since a price is current for a week.
+    with pytest.raises(SettingsError, match=rf"{key} must be {fix}.*Fix {key} in .*config\.toml"):
         load_settings(_config(tmp_path, line + "\n"))
-    with pytest.raises(SettingsError, match=rf"Fix {key} in .*config\.toml"):
-        load_settings(_config(tmp_path, line + "\n"))
+
+
+def test_the_search_limits_have_one_default():
+    from fuel_mcp.service import Choices  # noqa: PLC0415
+
+    defaults = load_settings(pathlib.Path("/nonexistent"))
+    assert (defaults.farthest_km, defaults.old_after_days) == (
+        Choices().farthest_km,
+        Choices().old_after_days,
+    )

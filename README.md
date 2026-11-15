@@ -44,8 +44,8 @@ when the voice gives no position, and `fuel` when a question names none:
 ```toml
 sources = ["drivstoffpriser"]   # one source; with none listed, nothing is fetched
 fuel = "petrol95"               # diesel when not set
-farthest_km = 20                # how far the search steps out; 20 when not set
-old_after_days = 30             # older than this is said as only an old price; 30 when not set
+farthest_km = 20                # how far the search steps out, 1 to 100 km; 20 when not set
+old_after_days = 30             # older is said as only an old price, 7 to 3650 days; 30 when not set
 [home]
 lat = 0.0
 lon = 0.0

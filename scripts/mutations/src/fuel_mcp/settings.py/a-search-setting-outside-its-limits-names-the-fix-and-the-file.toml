@@ -1,0 +1,5 @@
+[[rule]]
+name = "a search setting outside its limits names the fix and the file"
+file = "src/fuel_mcp/settings.py"
+find = '^    if not \(math\.isfinite\(number\) and low <= number <= high\):$'
+replace = 'if False:'
