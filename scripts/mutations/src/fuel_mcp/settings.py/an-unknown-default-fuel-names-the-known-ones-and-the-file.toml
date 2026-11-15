@@ -1,0 +1,5 @@
+[[rule]]
+name = "an unknown default fuel names the known ones and the file"
+file = "src/fuel_mcp/settings.py"
+find = 'if chosen not in known:'
+replace = 'if False:'

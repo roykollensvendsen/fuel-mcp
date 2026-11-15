@@ -1,0 +1,5 @@
+[[rule]]
+name = "a station beyond the search radius is never chosen"
+file = "src/fuel_mcp/service.py"
+find = 'near = \[\(p, km\) for p, km in near if km <= radius_km\]'
+replace = 'near = list(near)'

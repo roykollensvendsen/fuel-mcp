@@ -1,0 +1,5 @@
+[[rule]]
+name = "the owner's usual fuel is used when none is named"
+file = "src/fuel_mcp/service.py"
+find = 'return fuel or self._fuel'
+replace = 'return fuel or Fuel.DIESEL'

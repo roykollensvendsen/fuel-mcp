@@ -1,0 +1,5 @@
+[[rule]]
+name = "no price source is on until the owner lists one"
+file = "src/fuel_mcp/settings.py"
+find = 'DEFAULT_SOURCES: tuple\[str, \.\.\.\] = \(\)'
+replace = 'DEFAULT_SOURCES: tuple[str, ...] = ("drivstoffpriser",)'

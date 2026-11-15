@@ -1,0 +1,5 @@
+[[rule]]
+name = "a price time with no offset is read as norwegian time"
+file = "src/fuel_mcp/sources/drivstoffpriser.py"
+find = 'return moment.replace\(tzinfo=NORWAY\).astimezone\(dt.UTC\)'
+replace = 'return moment.replace(tzinfo=dt.UTC)'

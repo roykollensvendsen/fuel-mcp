@@ -1,0 +1,5 @@
+[[rule]]
+name = "a price older than a day is said as about"
+file = "src/fuel_mcp/speech.py"
+find = 'if hours >= HOURS_A_DAY:'
+replace = 'if False:'

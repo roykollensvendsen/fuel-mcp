@@ -1,0 +1,5 @@
+[[rule]]
+name = "a fuel price older than 7 days is never said as current"
+file = "src/fuel_mcp/service.py"
+find = 'current = \[\(p, km\) for p, km in near if now - p.updated_at <= CURRENT_FOR\]'
+replace = 'current = list(near)'

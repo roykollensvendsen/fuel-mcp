@@ -16,3 +16,6 @@ src/*/_version.py
 coverage.xml
 htmlcov/
 scripts/.mutate-recovery.json
+
+# The mutation run's figures; the checks keep them, the repository never does.
+mutations.json
