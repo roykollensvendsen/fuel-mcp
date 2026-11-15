@@ -66,7 +66,10 @@ def test_without_a_position_it_uses_home_from_local_config():
 def test_without_a_position_or_home_it_asks_where():
     answer = _service().price(Fuel.DIESEL)
     assert answer["success"] is False
-    assert answer["say"] == "Where are you? Share your position, or set home in the fuel plugin's config."
+    assert answer["say"] == (
+        "Where are you? Share your position, "
+        "or add [home] with lat and lon to ~/.config/fuel-mcp/config.toml."
+    )
 
 
 def test_no_station_nearby_says_so_and_names_none():

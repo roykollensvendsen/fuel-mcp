@@ -24,10 +24,52 @@ def _config(tmp_path, text):
     return folder
 
 
-def test_with_no_config_drivstoffpriser_is_on_and_there_is_no_home(tmp_path):
+def test_no_price_source_is_on_until_the_owner_lists_one(tmp_path):
     settings = load_settings(tmp_path / "absent")
-    assert settings.sources == ("drivstoffpriser",)
+    assert settings.sources == ()
     assert settings.home is None
+    assert load_settings(_config(tmp_path, "[home]\nlat = 0.0\nlon = 0.0\n")).sources == ()
+
+
+def test_with_no_config_the_answer_says_exactly_what_to_write(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert cli.main(["price", "--lat", "0", "--lon", "0"]) == 1
+    path = tmp_path / "fuel-mcp" / "config.toml"
+    assert capsys.readouterr().out.startswith(
+        "No fuel price source is switched on. "
+        f'To use Drivstoffpriser, add sources = ["drivstoffpriser"] to {path}.'
+    )
+
+
+def test_without_a_position_or_home_it_says_where_home_is_written(tmp_path, monkeypatch, capsys):
+    _config(tmp_path, 'sources = ["drivstoffpriser"]\n')
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert cli.main(["price"]) == 1
+    path = tmp_path / "fuel-mcp" / "config.toml"
+    assert capsys.readouterr().out.startswith(
+        f"Where are you? Share your position, or add [home] with lat and lon to {path}."
+    )
+
+
+def test_a_second_listed_source_is_refused_rather_than_ignored(tmp_path):
+    folder = _config(tmp_path, 'sources = ["drivstoffpriser", "drivstoffpriser"]\n')
+    with pytest.raises(
+        SettingsError, match="only one source is supported until merging is written; keep one of"
+    ):
+        load_settings(folder)
+
+
+def test_a_broken_tags_file_is_taken_as_no_tags(tmp_path):
+    from test_drivstoffpriser import Host  # noqa: PLC0415
+
+    from fuel_mcp.model import Fuel  # noqa: PLC0415
+
+    source = build_source(load_settings(_config(tmp_path, 'sources = ["drivstoffpriser"]\n')), tmp_path / "c")
+    source._fetch = Host()  # noqa: SLF001
+    (tmp_path / "c").mkdir()
+    (tmp_path / "c" / "prices.json").write_bytes(b"{}")
+    (tmp_path / "c" / "prices.json.tags.json").write_bytes(b"\xff not json")
+    assert len(source.prices_near(0.0, 0.0, 5.1, Fuel.DIESEL)) == 2
 
 
 def test_home_is_read_from_the_config(tmp_path):
@@ -59,7 +101,8 @@ def test_the_folders_follow_xdg():
 
 
 def test_the_listed_source_is_built_with_its_cache(tmp_path):
-    source = build_source(load_settings(tmp_path / "absent"), tmp_path / "cache")
+    settings = load_settings(_config(tmp_path, 'sources = ["drivstoffpriser"]\n'))
+    source = build_source(settings, tmp_path / "cache")
     assert source is not None
     assert source.label == "Drivstoffpriser"
 
@@ -80,7 +123,7 @@ def test_with_no_source_switched_on_it_says_so_and_sends_nothing(tmp_path, monke
     _config(tmp_path, "sources = []\n")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert cli.main(["price", "--lat", "0", "--lon", "0"]) == 1
-    assert capsys.readouterr().out.startswith("No fuel price source is switched on;")
+    assert capsys.readouterr().out.startswith("No fuel price source is switched on.")
 
 
 def test_a_settings_error_is_printed_with_its_fix(tmp_path, monkeypatch, capsys):
@@ -96,7 +139,7 @@ def test_the_real_price_uses_home_and_the_hourly_copy(tmp_path, monkeypatch, cap
 
     import fuel_mcp.sources.drivstoffpriser as source  # noqa: PLC0415
 
-    _config(tmp_path, "[home]\nlat = 0.0\nlon = 0.0\n")
+    _config(tmp_path, 'sources = ["drivstoffpriser"]\n[home]\nlat = 0.0\nlon = 0.0\n')
     cache = tmp_path / "cache" / "fuel-mcp"
     cache.mkdir(parents=True)
     stamp = source.dt.datetime.now(source.dt.UTC).isoformat()

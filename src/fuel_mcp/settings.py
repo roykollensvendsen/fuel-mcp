@@ -4,7 +4,7 @@
 They live in ``$XDG_CONFIG_HOME/fuel-mcp/config.toml``, normally
 ``~/.config/fuel-mcp/config.toml``, and never in the repository:
 
-    sources = ["drivstoffpriser"]   # the default, when the file is absent
+    sources = ["drivstoffpriser"]   # none is on until it is listed here
     [home]                          # used when the voice gives no position
     lat = 0.0
     lon = 0.0
@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 
 #: Each source by its name in config, and the module that holds it.
 KNOWN_SOURCES = {"drivstoffpriser": ("fuel_mcp.sources.drivstoffpriser", "DrivstoffpriserSource")}
-DEFAULT_SOURCES = ("drivstoffpriser",)
+# RULE: no price source is on until the owner lists one
+DEFAULT_SOURCES: tuple[str, ...] = ()
 
 
 class SettingsError(Exception):
@@ -61,8 +62,12 @@ def load_settings(folder: pathlib.Path) -> Settings:
     """Read the settings in `folder`; raises SettingsError naming what to fix."""
     path = folder / "config.toml"
     try:
-        table = tomllib.loads(path.read_text()) if path.is_file() else {}
-    except tomllib.TOMLDecodeError:
+        if path.is_file():
+            with path.open("rb") as file:  # bytes, so the bridge's missing locale cannot misread it
+                table = tomllib.load(file)
+        else:
+            table = {}
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
         msg = f"{path} is not valid TOML. Fix it, or move it aside to use the defaults: mv {path} {path}.bad"
         raise SettingsError(msg) from None
     sources = table.get("sources", list(DEFAULT_SOURCES))
@@ -74,6 +79,12 @@ def load_settings(folder: pathlib.Path) -> Settings:
             known = ", ".join(KNOWN_SOURCES)
             msg = f"unknown source '{name}'; the known ones are {known}. Fix sources in {path}"
             raise SettingsError(msg)
+    if len(sources) > 1:
+        msg = (
+            f"only one source is supported until merging is written; keep one of: {', '.join(sources)}. "
+            f"Fix sources in {path}"
+        )
+        raise SettingsError(msg)
     return Settings(home=_home(table.get("home"), path), sources=tuple(sources))
 
 
@@ -89,7 +100,7 @@ def _home(home: object, path: pathlib.Path) -> tuple[float, float] | None:
 
 
 def build_source(settings: Settings, cache: pathlib.Path) -> PriceSource | None:
-    """The first source listed, imported only now; None when no source is switched on."""
+    """The source listed, imported only now; None when no source is switched on."""
     if not settings.sources:
         return None
     module_name, class_name = KNOWN_SOURCES[settings.sources[0]]

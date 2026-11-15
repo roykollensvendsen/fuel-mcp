@@ -33,20 +33,22 @@ current: it is given with the day it was last reported.
 
 ## Real prices
 
-Without `--simulate`, prices come from Drivstoffpriser. Its export is
-checked at most once an hour, and only when someone asks
-([ADR-FM-001](decisions/ADR-FM-001-check-the-export-hourly-with-a-conditional-get.md)).
-The copy is kept in `~/.cache/fuel-mcp/`.
-
-Settings are optional, and live in `~/.config/fuel-mcp/config.toml`, never
-in this repository. Home is used when the voice gives no position:
+No price source is on until you list one. Settings live in
+`~/.config/fuel-mcp/config.toml`, never in this repository. Home is used
+when the voice gives no position:
 
 ```toml
-sources = ["drivstoffpriser"]   # the default; [] switches every source off
+sources = ["drivstoffpriser"]   # one source; with none listed, nothing is fetched
 [home]
 lat = 0.0
 lon = 0.0
 ```
+
+With Drivstoffpriser listed, its export is checked at most once an hour,
+and only when someone asks
+([ADR-FM-001](decisions/ADR-FM-001-check-the-export-hourly-with-a-conditional-get.md)).
+The copy is kept in `~/.cache/fuel-mcp/`. Its times are read as Norwegian
+time, because the app stores the reporting phone's local time.
 
 A mistake in the file is said with the fix:
 

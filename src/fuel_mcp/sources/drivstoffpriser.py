@@ -92,7 +92,7 @@ class DrivstoffpriserSource:
     def _file(self, name: str) -> bytes:
         """The file's body, from the copy or from the host."""
         copy, tags = self._cache / name, self._cache / f"{name}.tags.json"
-        meta: dict[str, str] = json.loads(tags.read_text()) if tags.is_file() and copy.is_file() else {}
+        meta = _tags(tags) if copy.is_file() else {}
         now = self._now()
         checked = dt.datetime.fromisoformat(meta["checked_at"]) if "checked_at" in meta else None
         # RULE: a copy checked within the hour is used without asking
@@ -109,7 +109,7 @@ class DrivstoffpriserSource:
             return self._failed(now, name, meta, f"could not be fetched: {error}")
         if reply.status == NOT_MODIFIED and meta:
             meta["checked_at"] = now.isoformat()
-            tags.write_text(json.dumps(meta))
+            tags.write_text(json.dumps(meta), encoding="utf-8")
             self._recovered()
             return copy.read_bytes()
         if reply.status != OK:
@@ -132,7 +132,7 @@ class DrivstoffpriserSource:
             for key, h in (("etag", "etag"), ("last_modified", "last-modified"))
             if h in headers
         }
-        tags.write_text(json.dumps(fresh))
+        tags.write_text(json.dumps(fresh), encoding="utf-8")
         self._recovered()
         return reply.body
 
@@ -141,14 +141,14 @@ class DrivstoffpriserSource:
         if not marker.is_file():
             return False
         try:
-            return now - dt.datetime.fromisoformat(marker.read_text().strip()) < RETRY_AFTER
+            return now - dt.datetime.fromisoformat(marker.read_text(encoding="utf-8").strip()) < RETRY_AFTER
         except ValueError:
             return False
 
     def _failed(self, now: dt.datetime, name: str, meta: dict[str, str], why: str) -> bytes:
         """Note the failure, so the host is left alone for a while, then answer from the copy."""
         self._cache.mkdir(parents=True, exist_ok=True)
-        (self._cache / FAILED_AT).write_text(now.isoformat())
+        (self._cache / FAILED_AT).write_text(now.isoformat(), encoding="utf-8")
         return self._copy_or_unavailable(name, meta, why)
 
     def _recovered(self) -> None:
@@ -159,6 +159,15 @@ class DrivstoffpriserSource:
             return (self._cache / name).read_bytes()
         msg = f"{name} {why}, and there is no copy"
         raise SourceUnavailableError(msg)
+
+
+def _tags(path: pathlib.Path) -> dict[str, str]:
+    """The tags kept with a copy; a missing or broken file is taken as none, so the host is asked."""
+    try:
+        found = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return {}
+    return {str(k): str(v) for k, v in found.items()} if isinstance(found, dict) else {}
 
 
 def parse_export(stations: bytes, prices: bytes, *, source: str) -> list[StationPrice]:
