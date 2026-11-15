@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -57,7 +58,36 @@ class Response:
 
 
 def urllib_fetch(url: str, headers: Mapping[str, str], timeout: float) -> Response:
-    """One GET with `headers`, finished within `timeout` seconds in all; an HTTP status is an answer."""
+    """One GET with `headers`, finished within `timeout` seconds in all; an HTTP status is an answer.
+
+    A socket timeout covers neither the name lookup nor the whole of a slow read, so the
+    GET runs in a thread of its own and is no longer waited for once the time is up. The
+    thread is left to end on its own socket timeout; nothing waits for it.
+    """
+    outcome: dict[str, Response | BaseException] = {}
+
+    def get() -> None:
+        try:
+            outcome["reply"] = _get(url, headers, timeout)
+        except BaseException as error:  # noqa: BLE001 - handed to the caller below
+            outcome["error"] = error
+
+    worker = threading.Thread(target=get, name="fuel-mcp-fetch", daemon=True)
+    worker.start()
+    # RULE: a slow host never holds a question past its time
+    worker.join(timeout)
+    failure = outcome.get("error")
+    if isinstance(failure, BaseException):
+        raise failure
+    reply = outcome.get("reply")
+    if not isinstance(reply, Response):
+        msg = f"the host took more than {timeout:.1f} s"
+        raise TimeoutError(msg)
+    return reply
+
+
+def _get(url: str, headers: Mapping[str, str], timeout: float) -> Response:
+    """The GET itself, with each read checked against the time left."""
     request = urllib.request.Request(url, headers={**headers, "User-Agent": USER_AGENT})  # noqa: S310
     deadline = time.monotonic() + timeout
     try:

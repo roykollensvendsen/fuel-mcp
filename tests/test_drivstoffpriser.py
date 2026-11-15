@@ -9,6 +9,8 @@ import datetime as dt
 import email.utils
 import io
 import json
+import threading
+import time
 import urllib.error
 
 import pytest
@@ -325,3 +327,29 @@ def test_a_price_time_with_no_offset_is_read_as_norwegian_time(stamp, utc_hour):
     prices = {**PRICES, "prices": [{**PRICES["prices"][0], "updatedAt": stamp}]}
     found = drivstoffpriser.parse_export(BODIES["stations.json"], json.dumps(prices).encode(), source="x")
     assert found[0].updated_at.astimezone(dt.UTC).hour == utc_hour
+
+
+def test_a_slow_host_never_holds_a_question_past_its_time(monkeypatch):
+    """A name lookup or a read that hangs is not covered by a socket timeout, so the wait is cut off."""
+    released = threading.Event()
+
+    def hangs(*_, **__):
+        released.wait(5)
+        return _Reply(b"{}")
+
+    monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", hangs)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match=r"0\.2 s"):
+        drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 0.2)
+    assert time.monotonic() - started < 1.5
+    released.set()
+
+
+def test_a_failure_inside_the_fetch_reaches_the_question(monkeypatch):
+    def refused(*_, **__):
+        msg = "connection refused"
+        raise urllib.error.URLError(msg)
+
+    monkeypatch.setattr(drivstoffpriser.urllib.request, "urlopen", refused)
+    with pytest.raises(urllib.error.URLError, match="refused"):
+        drivstoffpriser.urllib_fetch("https://example.invalid/prices.json", {}, 3.0)
