@@ -39,10 +39,15 @@ NAMED = re.compile(re.escape(PREFIX) + r"\d+")
 #: A run's folder is made under this name, locked, and only then given its run name, so a
 #: sweep never sees a run's name without its lock held. A run killed in between leaves one.
 STARTING = re.compile(re.escape(PREFIX) + r"starting-\w+")
-#: How old an unlocked starting folder must be before it counts as left by a killed run.
+#: How old a folder with no lock held, or none made yet, must be before it counts as left
+#: by a killed run. A guess: a run takes well under a second to start and lock its folder,
+#: and nothing measured says how long a run killed while starting may sit before then.
 STARTING_SECONDS = 3600
 LOCK = ".lock"
 OPEN_LOCK = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW
+#: A sweep only opens a lock that is there: one it made would sit in a new run's folder
+#: before that run moves in, and the run's rename onto it would then fail.
+OPEN_THEIR_LOCK = os.O_RDWR | os.O_NOFOLLOW
 
 
 def _open_up(place: pathlib.Path) -> None:
@@ -106,9 +111,12 @@ def _dead(path: pathlib.Path) -> bool:
     if not _ours_to_look_at(path):
         return False
     try:
-        lock = os.open(path / LOCK, OPEN_LOCK, 0o600)
+        lock = os.open(path / LOCK, OPEN_THEIR_LOCK)
+    except FileNotFoundError:
+        # No lock yet: a new run's claimed name, or a run killed before it locked.
+        return time.time() - path.lstat().st_mtime >= STARTING_SECONDS
     except OSError:
-        return bool(STARTING.fullmatch(path.name))  # killed before it could lock
+        return False
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
