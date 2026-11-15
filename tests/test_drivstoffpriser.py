@@ -82,7 +82,7 @@ def test_the_export_is_read_into_prices_with_names_and_ages(tmp_path):
     assert set(by_name) == {"Made-up North", "Made-up East"}
     north = by_name["Made-up North"]
     assert (north.price, north.brand, north.report_count) == (19.84, "Brand A", 3)
-    assert north.updated_at == dt.datetime(2030, 1, 1, 9, 0, tzinfo=dt.UTC)
+    assert north.updated_at == dt.datetime(2030, 1, 1, 8, 0, tzinfo=dt.UTC)  # 09:00 in Oslo, winter
     assert north.source == "Drivstoffpriser"
 
 
@@ -268,3 +268,19 @@ def test_a_bad_export_keeps_the_good_copy(tmp_path):
 
 def test_one_question_waits_for_at_most_one_timeout():
     assert drivstoffpriser.TIMEOUT_S <= 6  # the voice gives up after about 15 s
+
+
+@pytest.mark.parametrize(
+    ("stamp", "utc_hour"),
+    [
+        ("2030-01-15T12:00:00.000000", 11),
+        ("2030-07-15T12:00:00.000000", 10),
+        ("2030-07-15T12:00:00+00:00", 12),
+    ],
+    ids=["winter", "summer", "with an offset"],
+)
+def test_a_price_time_with_no_offset_is_read_as_norwegian_time(stamp, utc_hour):
+    # The app stores the reporting phone's local time with no offset; only exportedAt is UTC.
+    prices = {**PRICES, "prices": [{**PRICES["prices"][0], "updatedAt": stamp}]}
+    found = drivstoffpriser.parse_export(BODIES["stations.json"], json.dumps(prices).encode(), source="x")
+    assert found[0].updated_at.astimezone(dt.UTC).hour == utc_hour

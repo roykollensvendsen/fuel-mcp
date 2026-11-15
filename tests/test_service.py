@@ -122,3 +122,23 @@ def test_a_date_this_year_is_said_without_the_year():
 
     assert spoken_date(dt.datetime(2030, 5, 15, 9, tzinfo=dt.UTC), NOW) == "15 May"
     assert spoken_date(dt.datetime(2029, 12, 17, 9, tzinfo=dt.UTC), NOW) == "17 December 2029"
+
+
+class _FromTheFuture:
+    label = "Drivstoffpriser"
+
+    def prices_near(self, lat, lon, radius_km, fuel):
+        return FakeSource(now=NOW + dt.timedelta(hours=5)).prices_near(lat, lon, radius_km, fuel)
+
+
+def test_a_price_stamped_in_the_future_is_taken_as_just_now():
+    answer = _service(_FromTheFuture()).price(Fuel.PETROL98, lat=0.0, lon=0.0)
+    assert answer["say"].endswith("Drivstoffpriser's price is under an hour old.")
+    assert answer["station"]["updated_at"] == NOW.isoformat()
+
+
+def test_a_date_is_the_day_in_norway_not_in_utc():
+    from fuel_mcp.speech import spoken_date  # noqa: PLC0415
+
+    late = dt.datetime(2030, 5, 14, 22, 30, tzinfo=dt.UTC)  # 00:30 on 15 May in Oslo
+    assert spoken_date(late, NOW) == "15 May"

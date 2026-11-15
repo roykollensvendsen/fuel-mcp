@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from fuel_mcp.geo import distance_km
 from fuel_mcp.model import Fuel, SourceUnavailableError, StationPrice
+from fuel_mcp.speech import NORWAY
 
 if TYPE_CHECKING:
     import pathlib
@@ -201,6 +202,14 @@ def _records(body: bytes, key: str) -> list[dict[str, Any]]:
 
 
 def _utc(stamp: str) -> dt.datetime:
-    """A timestamp from the export. The prices carry no offset; they are taken as UTC, as exportedAt is."""
+    """A timestamp from the export, in UTC.
+
+    The app stores a price's time as the reporting phone's local time, with no
+    offset; only exportedAt carries one. A time with no offset is therefore
+    read as Norwegian time.
+    """
     moment = dt.datetime.fromisoformat(stamp)
-    return moment if moment.tzinfo else moment.replace(tzinfo=dt.UTC)
+    if moment.tzinfo is not None:
+        return moment.astimezone(dt.UTC)
+    # RULE: a price time with no offset is read as norwegian time
+    return moment.replace(tzinfo=NORWAY).astimezone(dt.UTC)
