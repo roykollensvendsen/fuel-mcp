@@ -7,6 +7,7 @@ the station, never the point it was asked from.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 from typing import TYPE_CHECKING, Any
 
@@ -69,6 +70,8 @@ class FuelService:
         if not near:
             return _answer(f"I can't see a {fuel.spoken.lower()} price within {round(radius_km)} kilometres.")
         now = self._now()
+        # A phone with a fast clock can report a price from the future; it is taken as just now.
+        near = [(dataclasses.replace(p, updated_at=min(p.updated_at, now)), km) for p, km in near]
         # RULE: a fuel price older than 7 days is never said as current
         current = [(p, km) for p, km in near if now - p.updated_at <= CURRENT_FOR]
         if not current:

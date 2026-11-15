@@ -8,9 +8,13 @@ eighty-four", never "nineteen point eight four".
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     import datetime as dt
+
+#: Where the prices are reported, and so the clock and calendar they are said in.
+NORWAY = ZoneInfo("Europe/Oslo")
 
 _ONES = [
     "zero",
@@ -99,6 +103,7 @@ def spoken_age(updated_at: dt.datetime, now: dt.datetime) -> str:
 
 
 def spoken_date(moment: dt.datetime, now: dt.datetime) -> str:
-    """A day as it is said: "15 May", with the year only when it is not this one."""
-    day = f"{moment.day} {_MONTHS[moment.month - 1]}"
-    return day if moment.year == now.year else f"{day} {moment.year}"
+    """A day in Norway as it is said: "15 May", with the year only when it is not this one."""
+    local, today = moment.astimezone(NORWAY), now.astimezone(NORWAY)
+    day = f"{local.day} {_MONTHS[local.month - 1]}"
+    return day if local.year == today.year else f"{day} {local.year}"
