@@ -48,6 +48,8 @@ lon = 0.0
 With Drivstoffpriser listed, its export is checked at most once an hour,
 and only when someone asks
 ([ADR-FM-001](decisions/ADR-FM-001-check-the-export-hourly-with-a-conditional-get.md)).
+A question waits on the host for 8 seconds in all. After that it answers
+from the copy, or says the data isn't available.
 The copy is kept in `~/.cache/fuel-mcp/`. Its times are read as Norwegian
 time, because the app stores the reporting phone's local time.
 
