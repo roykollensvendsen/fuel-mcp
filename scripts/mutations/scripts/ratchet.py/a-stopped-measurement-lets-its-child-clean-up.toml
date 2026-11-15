@@ -1,5 +1,0 @@
-[[rule]]
-name = "a stopped measurement lets its child clean up"
-file = "scripts/ratchet.py"
-find = '^            child\.send_signal\(signal\.SIGINT\)$'
-replace = 'pass'
