@@ -6,12 +6,17 @@ A private file is written to a new file beside it, then moved into place with
 The new file is made by this process alone, with ``O_EXCL`` and ``O_NOFOLLOW``,
 and set to 0600 before anything is written to it.
 
+Its folder must be the owner's own, and not a link. A folder of his that is
+open to others is closed to 0700 before anything goes in it, with one log line
+naming the folder. The log never holds what the file holds.
+
 The cache of public prices doesn't use this: it holds nothing private.
 """
 
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import secrets
 import stat
@@ -25,6 +30,8 @@ MODE = 0o600
 FOLDER_MODE = 0o700
 NEW = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
 OPEN_MINE = os.O_RDONLY | os.O_NOFOLLOW
+OPEN_FOLDER = os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY
+log = logging.getLogger("fuel_mcp")
 
 
 class PrivateFileError(OSError):
@@ -34,6 +41,7 @@ class PrivateFileError(OSError):
 def write_private(path: pathlib.Path, data: bytes) -> None:
     """Put `data` at `path`, readable by the owner only; raises PrivateFileError."""
     path.parent.mkdir(mode=FOLDER_MODE, parents=True, exist_ok=True)
+    _close_folder(path.parent)
     # RULE: a private write refuses a link where the file goes
     if path.is_symlink():
         msg = f"{path} is a link, so it isn't written. Remove the link: rm {path}"
@@ -52,6 +60,28 @@ def write_private(path: pathlib.Path, data: bytes) -> None:
         with contextlib.suppress(FileNotFoundError):
             temp.unlink()
         raise
+
+
+def _close_folder(folder: pathlib.Path) -> None:
+    """Refuse a folder that is a link or someone else's; close one of the owner's to 0700."""
+    try:
+        fd = os.open(folder, OPEN_FOLDER)
+    except OSError as error:  # ELOOP: a link; ENOTDIR: not a folder
+        msg = f"{folder} can't hold private files ({error.strerror}). Remove it: rm {folder}"
+        raise PrivateFileError(msg) from None
+    try:
+        facts = os.fstat(fd)
+        # RULE: a private file's folder is the owner's and closed to others
+        if facts.st_uid != os.getuid():
+            msg = (
+                f"{folder} isn't a folder of yours, so nothing private goes in it. Remove it: rm -r {folder}"
+            )
+            raise PrivateFileError(msg)
+        if stat.S_IMODE(facts.st_mode) & 0o077:
+            os.fchmod(fd, FOLDER_MODE)
+            log.warning("fuel-mcp: %s was open to others; it is now closed to them (0700)", folder)
+    finally:
+        os.close(fd)
 
 
 def read_private(path: pathlib.Path) -> bytes | None:

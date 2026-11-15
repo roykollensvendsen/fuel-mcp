@@ -9,6 +9,16 @@ Stations and times still make a trail: a station near home at 07:40 every
 weekday says where the owner lives and when he leaves. So a report is kept only
 for ``own_report_keep_hours``, 12 unless he sets another. It is removed at the
 next save or read after that.
+
+What can't be read is never trusted, and fails closed:
+
+* A garbled line is left out, with a log line. A file that is a link, or
+  another user's, is not read at all, with a log line.
+* At the next save the file is replaced by the reports that could be read, plus
+  the new one, and the log says the unreadable part was dropped.
+* If the write is refused too, because a link stands where the file goes or the
+  folder isn't the owner's, the report is not saved. The answer says so, and
+  nothing is sent anywhere.
 """
 
 from __future__ import annotations
@@ -16,7 +26,7 @@ from __future__ import annotations
 import datetime as dt
 
 # RULE: the public package holds no sender
-import json
+import json  # stdlib only: no network client may be imported here
 import logging
 from typing import TYPE_CHECKING
 
@@ -42,11 +52,15 @@ class LocalSink:
         """`folder` is fuel-mcp's state folder; a report older than `keep` is removed."""
         self._path = folder / FILE_NAME
         self._keep = keep
+        self._unreadable = False
 
     def take(self, report: OwnReport) -> None:
         """Add the report to the file; raises SinkRefusedError when the file can't be written."""
         kept = [*self._kept(report.reported_at), report]
         self._write(kept)
+        if self._unreadable:
+            log.warning("fuel-mcp: %s was replaced; the part that couldn't be read was dropped", self._path)
+            self._unreadable = False
 
     def recent(self, fuel: Fuel, now: dt.datetime) -> list[OwnReport]:
         """Every report for `fuel` still kept at `now`, oldest first."""
@@ -67,12 +81,14 @@ class LocalSink:
             body = read_private(self._path)
         except PrivateFileError as error:
             log.warning("fuel-mcp: own reports not read: %s", error)
+            self._unreadable = True
             return []
         reports = []
         for line in (body or b"").decode("utf-8", "replace").splitlines():
             report = _parsed(line)
             if report is None:
                 log.warning("fuel-mcp: a line of %s isn't a report, so it is left out", self._path)
+                self._unreadable = True
             else:
                 reports.append(report)
         return reports

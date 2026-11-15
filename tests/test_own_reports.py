@@ -89,6 +89,36 @@ def test_a_missing_private_file_reads_as_none(tmp_path):
     assert read_private(tmp_path / "absent") is None
 
 
+def test_an_open_private_folder_is_closed_to_others(tmp_path, caplog):
+    # The owner's own folder, left open by a umask or by hand, is closed before anything is put in it.
+    folder = tmp_path / "state"
+    folder.mkdir()
+    folder.chmod(0o777)
+    write_private(folder / "file", b"words")
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    assert str(folder) in caplog.text
+    assert "words" not in caplog.text
+
+
+def test_a_private_file_s_folder_is_the_owner_s_and_closed_to_others(tmp_path, monkeypatch):
+    folder = tmp_path / "state"
+    folder.mkdir(mode=0o700)
+    someone_else = os.getuid() + 1
+    monkeypatch.setattr(safe_file.os, "getuid", lambda: someone_else)
+    with pytest.raises(PrivateFileError, match=rf"{folder} isn't a folder of yours"):
+        write_private(folder / "file", b"words")
+    monkeypatch.undo()
+    assert list(folder.iterdir()) == []
+
+
+def test_a_private_file_s_folder_that_is_a_link_is_refused(tmp_path):
+    (tmp_path / "real").mkdir(mode=0o700)
+    (tmp_path / "state").symlink_to(tmp_path / "real")
+    with pytest.raises(PrivateFileError, match="state"):
+        write_private(tmp_path / "state" / "file", b"words")
+    assert list((tmp_path / "real").iterdir()) == []
+
+
 # -- the local sink ------------------------------------------------------------------------
 
 
@@ -133,6 +163,16 @@ def test_a_broken_line_is_left_out_and_the_rest_read(tmp_path, caplog):
         file.write("not a report\n")
     assert sink.recent(Fuel.DIESEL, NOW) == [_report(5)]
     assert "isn't a report" in caplog.text
+    assert "21.49" not in caplog.text
+
+
+def test_a_garbled_list_is_replaced_at_the_next_save_and_the_log_says_so(tmp_path, caplog):
+    (tmp_path / FILE_NAME).write_text("not a report\n")
+    (tmp_path / FILE_NAME).chmod(0o600)
+    sink = LocalSink(tmp_path, keep=KEEP)
+    sink.take(_report(5))
+    assert (tmp_path / FILE_NAME).read_text().count("\n") == 1
+    assert "replaced" in caplog.text
     assert "21.49" not in caplog.text
 
 
