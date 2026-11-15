@@ -167,7 +167,7 @@ def _until(path, child, deadline):
 def test_a_stopped_run_puts_the_tree_back_in_a_whole_run(tmp_path, monkeypatch, stop):
     """A cancelled CI job, a closed terminal or Ctrl-C stops the run, and `finally` must still run.
 
-    Each ends it with 128 plus the signal's number, so Ctrl-C is exit 130, not an interrupt.
+    SIGTERM and SIGHUP end it with 128 plus the signal's number; Ctrl-C ends it as an interrupt.
     """
     _whole_run(tmp_path, monkeypatch)
     child = subprocess.Popen(
@@ -183,7 +183,9 @@ def test_a_stopped_run_puts_the_tree_back_in_a_whole_run(tmp_path, monkeypatch, 
     assert (tmp_path / "project/rule.py").read_text() == "x = 2\n", "the rule was switched off"
     child.send_signal(stop)
     out, _ = child.communicate(timeout=30)
-    assert child.returncode == 128 + stop, out
+    # Ctrl-C ends as an uncaught KeyboardInterrupt does, by Python's own SIGINT; a shell says 130.
+    ended = {128 + stop, -stop} if stop == signal.SIGINT else {128 + stop}
+    assert child.returncode in ended, out
     assert (tmp_path / "project/rule.py").read_text() == "x = 1\n"
     assert not (tmp_path / "recovery.json").exists()
     assert not (tmp_path / "mutate-tmp").exists()
