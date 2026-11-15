@@ -155,9 +155,14 @@ def _until(path, child, deadline):
         time.sleep(0.05)
 
 
-@pytest.mark.parametrize("stop", [signal.SIGTERM, signal.SIGHUP], ids=["SIGTERM", "SIGHUP"])
+@pytest.mark.parametrize(
+    "stop", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP], ids=["SIGINT", "SIGTERM", "SIGHUP"]
+)
 def test_a_stopped_run_puts_the_tree_back_in_a_whole_run(tmp_path, monkeypatch, stop):
-    """A cancelled CI job or a closed terminal stops the run by signal, and `finally` must still run."""
+    """A cancelled CI job, a closed terminal or Ctrl-C stops the run, and `finally` must still run.
+
+    Each ends it with 128 plus the signal's number, so Ctrl-C is exit 130, not an interrupt.
+    """
     _whole_run(tmp_path, monkeypatch)
     child = subprocess.Popen(
         [sys.executable, "-c", STOPPED_RUN, str(ROOT), str(tmp_path)],
