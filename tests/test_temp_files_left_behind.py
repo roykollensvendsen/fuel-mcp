@@ -256,6 +256,25 @@ def test_a_second_signal_cannot_cut_the_cleanup_short(tmp_path, monkeypatch):
     _ignores_a_second_signal(ROOT / "scripts/mutate.py", monkeypatch, tmp_path)
 
 
+def _interrupted_as_ctrl_c(script, monkeypatch, tmp_path):
+    module = _load(script.stem + "_ctrl_c", script, monkeypatch, tmp_path)
+    with _handlers_kept():
+        for each in STOPS:
+            signal.signal(each, signal.SIG_DFL)
+        module.stop_cleanly()
+        with pytest.raises(KeyboardInterrupt):
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+
+
+def test_ctrl_c_stops_a_run_as_an_interrupt(tmp_path, monkeypatch):
+    """Ctrl-C still reads as Ctrl-C to whatever runs the script: an interrupt, not an exit."""
+    _interrupted_as_ctrl_c(ROOT / "scripts/mutate.py", monkeypatch, tmp_path)
+
+
+def test_ctrl_c_stops_a_measurement_as_an_interrupt(tmp_path, monkeypatch):
+    _interrupted_as_ctrl_c(ROOT / "scripts/ratchet.py", monkeypatch, tmp_path)
+
+
 def test_a_stopped_measurement_removes_its_copy(tmp_path, monkeypatch):
     _stops_on_every_signal(ROOT / "scripts/ratchet.py", monkeypatch, tmp_path)
 
