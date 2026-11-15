@@ -58,7 +58,7 @@ way to learn that the gates are not a ritual performed once.
    turn the rule off with `uv run python scripts/mutate.py`, watch a named test
    go red, and keep the row in its own file under `scripts/mutations/`.
 
-   A rule is a line marked `# RULE: what it says` in the source. Every one needs
+   A rule is a line marked `# RULE: what it says` in `src/` or `scripts/`. Every one needs
    a row and a test whose name is the rule's own
    words — `# RULE: a spoken reply is capped` wants
    `test_a_spoken_reply_is_capped`. `tests/test_rules_have_evidence.py` refuses
