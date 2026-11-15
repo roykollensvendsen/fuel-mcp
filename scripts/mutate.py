@@ -175,18 +175,28 @@ def stop_cleanly() -> None:
     """Let a run told to stop (SIGTERM) put the tree back and remove its files first.
 
     By default the signal ends Python at once, with no `finally` run: a mutated file
-    stays switched off and the suite's temporary files stay behind.
+    stays switched off and the suite's temporary files stay behind. A cancelled CI job
+    or a closed terminal stops it the same way, by SIGINT, SIGTERM or SIGHUP.
     """
+    stops = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
     def stop(signum: int, _frame: object) -> None:
+        # RULE: a second stop does not cut the cleanup short
+        for each in stops:  # GitHub cancels with SIGINT, then SIGTERM
+            signal.signal(each, signal.SIG_IGN)
+        if signum == signal.SIGINT:
+            raise KeyboardInterrupt
         raise SystemExit(128 + signum)
 
-    signal.signal(signal.SIGTERM, stop)
+    # RULE: a stopped run cleans up as an interrupted one does
+    for each in stops:
+        signal.signal(each, stop)
 
 
 def _tidy() -> None:
     """Remove the run's temporary folder once nothing is left in it."""
-    with contextlib.suppress(OSError):
+    # RULE: a finished run leaves no folder of its own behind
+    with contextlib.suppress(OSError):  # rmdir takes it only when empty
         MUTATE_TMP.rmdir()
 
 
