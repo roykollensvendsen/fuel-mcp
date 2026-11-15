@@ -1,0 +1,5 @@
+[[rule]]
+name = "a copy checked within the hour is used without asking"
+file = "src/fuel_mcp/sources/drivstoffpriser.py"
+find = 'if checked is not None and now - checked < CHECK_EVERY:'
+replace = 'if False:'

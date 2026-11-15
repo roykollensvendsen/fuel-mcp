@@ -1,0 +1,5 @@
+[[rule]]
+name = "a broken private file refuses the commit never skips the check"
+file = "scripts/private_data_scan.py"
+find = 'raise PrivateFileError\(path\) from None'
+replace = 'return {}'

@@ -1,0 +1,5 @@
+[[rule]]
+name = "a failing host is not asked again for ten minutes"
+file = "src/fuel_mcp/sources/drivstoffpriser.py"
+find = 'if self._failed_recently\(now\):'
+replace = 'if False:'
