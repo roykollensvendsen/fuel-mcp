@@ -52,6 +52,7 @@ def test_a_test_run_leaves_nothing_in_the_temporary_folder(tmp_path):
 def _run_folder(temp, digits="123456789012"):
     folder = temp / f"fuel-mcp-tests-{digits}"
     folder.mkdir(parents=True)
+    (folder / ".lock").touch()  # a run locks it as it starts; a killed run's lock is free
     (folder / "kept").write_text("a run's folder")
     return folder
 
@@ -88,7 +89,7 @@ def test_a_live_runs_folder_is_kept(tmp_path):
         done = _pytest(temp, "tests/test_speech.py")
         holder.stdin.close()
     assert done.returncode == 0, done.stdout
-    assert _files_in(temp) == [f"{live.name}/.lock", f"{live.name}/kept"]
+    assert _files_in(temp) == [f"{live.name}/.lock", f"{live.name}/kept"]  # untouched
 
 
 def test_a_link_named_like_a_run_is_left_alone(tmp_path):
@@ -203,3 +204,25 @@ def test_another_users_folder_is_never_swept(tmp_path, monkeypatch):
     monkeypatch.setattr(conftest.os, "getuid", lambda: theirs.lstat().st_uid + 1)
     conftest.sweep_dead_runs(tmp_path)
     assert (theirs / "kept").exists()
+
+
+def test_a_runs_folder_not_yet_locked_is_left_alone_and_given_no_lock(tmp_path):
+    """Between claiming its name and moving in, a new run's folder has no lock yet."""
+    import conftest  # noqa: PLC0415 - the hooks under test
+
+    fresh = tmp_path / "fuel-mcp-tests-123456789012"
+    fresh.mkdir()
+    conftest.sweep_dead_runs(tmp_path)
+    assert fresh.is_dir()
+    assert list(fresh.iterdir()) == []  # no lock made there, so its rename can still land
+
+
+def test_an_old_runs_folder_with_no_lock_is_swept(tmp_path):
+    import conftest  # noqa: PLC0415 - the hooks under test
+
+    old = tmp_path / "fuel-mcp-tests-123456789012"
+    old.mkdir()
+    then = time.time() - 2 * 3600
+    os.utime(old, (then, then))
+    conftest.sweep_dead_runs(tmp_path)
+    assert not old.exists()
