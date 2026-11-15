@@ -60,8 +60,16 @@ def test_a_report_is_saved_and_undone_through_the_tools(tmp_path):
 
 
 def test_without_reporting_set_up_the_report_tools_say_so():
-    answer = _call(_server(), "fuel_report", price=21.49)
-    assert answer == {"success": False, "say": "Reporting a price isn't set up here."}
+    server = _server()
+    for tool, arguments in [
+        ("fuel_report", {"price": 21.49}),
+        ("fuel_report_undo", {}),
+        ("fuel_report_confirm", {"token": "t"}),
+    ]:
+        assert _call(server, tool, **arguments) == {
+            "success": False,
+            "say": "Reporting a price isn't set up here.",
+        }
 
 
 def test_diesel_is_the_fuel_when_none_is_named():

@@ -32,6 +32,13 @@ INSTRUCTIONS = (
     "fuel_report_confirm only on their clear yes to its question, once."
 )
 
+#: The phone's position, as both the price and the report tools take it.
+Lat = Annotated[float | None, Field(description="The phone's latitude, if known.")]
+Lon = Annotated[float | None, Field(description="The phone's longitude, if known.")]
+Accuracy = Annotated[
+    float | None, Field(description="How exact the position is, in metres; 100 if not given.")
+]
+
 SIMULATED = "SIMULATED: these are made-up stations, not real ones. Say so when you report on them. "
 
 
@@ -60,11 +67,9 @@ def build_server(
                 description="The fuel: diesel, petrol95 or petrol98. Leave it out when the user names none."
             ),
         ] = None,
-        lat: Annotated[float | None, Field(description="The phone's latitude, if known.")] = None,
-        lon: Annotated[float | None, Field(description="The phone's longitude, if known.")] = None,
-        accuracy_m: Annotated[
-            float | None, Field(description="How exact the position is, in metres; 100 if not given.")
-        ] = None,
+        lat: Lat = None,
+        lon: Lon = None,
+        accuracy_m: Accuracy = None,
     ) -> dict[str, Any]:
         ask = functools.partial(
             service.price, Fuel(fuel) if fuel else None, lat=lat, lon=lon, accuracy_m=accuracy_m
@@ -101,11 +106,9 @@ def _report_tools(server: MCPServer[Any], reporter: Reporter | None, *, simulate
             Fuels | None, Field(description="diesel, petrol95 or petrol98. Leave it out when none is named.")
         ] = None,
         station: Annotated[str | None, Field(description="The station's name, if the user says one.")] = None,
-        lat: Annotated[float | None, Field(description="The phone's latitude, if known.")] = None,
-        lon: Annotated[float | None, Field(description="The phone's longitude, if known.")] = None,
-        accuracy_m: Annotated[
-            float | None, Field(description="How exact the position is, in metres; 100 if not given.")
-        ] = None,
+        lat: Lat = None,
+        lon: Lon = None,
+        accuracy_m: Accuracy = None,
     ) -> dict[str, Any]:
         if reporter is None:
             return NOT_SET_UP

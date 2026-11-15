@@ -310,11 +310,13 @@ def test_the_newest_price_for_a_station_wins_whichever_it_comes_from(tmp_path):
     assert new_say.startswith("Diesel is cheapest at Fake Fuel Gamma, nineteen fifty")
 
 
-def test_an_own_report_older_than_own_report_hours_is_not_said(tmp_path):
-    clock = Clock()
-    service = _price_service(tmp_path, clock, [_own(18.00, 3 * 60)], hours=2)
+@pytest.mark.parametrize(("hours", "said"), [(2, False), (4, True)])
+def test_an_own_report_older_than_own_report_hours_is_not_said(tmp_path, hours, said):
+    # At Zeta, which has no price of its own, so only the hours can keep the report out.
+    report = _own(18.00, 3 * 60, station="fake_zeta", name="Fake Fuel Zeta")
+    service = _price_service(tmp_path / str(hours), Clock(), [report], hours=hours)
     answer = service.price(Fuel.DIESEL, lat=0.0, lon=0.0, accuracy_m=10)
-    assert "your own report" not in answer["say"]
+    assert ("your own report" in answer["say"]) is said, answer["say"]
 
 
 def test_an_estimate_is_never_chosen_over_a_reported_price():
@@ -331,3 +333,59 @@ def test_an_estimate_is_never_chosen_over_a_reported_price():
     answer = FuelService(Estimating(now=NOW), now=clock).price(Fuel.DIESEL, lat=0.0, lon=0.0, accuracy_m=10)
     assert answer["say"].startswith("Diesel is cheapest at Fake Fuel Beta, nineteen seventy-nine")
     assert answer["say"].endswith(" Drivstoffpriser's estimate at Fake Fuel Gamma is fifteen kroner.")
+
+
+class _Crashing(Sender):
+    def take(self, report):
+        msg = "a bug in the sender"
+        raise RuntimeError(msg)
+
+
+class _Refusing(LocalSink):
+    """The owner's own list, when it can't be written or read: a folder open to others, say."""
+
+    def take(self, report):
+        msg = "Your own list's folder is open to others. Fix it with chmod go-rwx."
+        raise SinkRefusedError(msg)
+
+    forget_latest = recent = lambda self, *_: self.take(None)  # every use refuses alike
+
+
+def test_a_crashing_sender_is_said_as_failed_and_the_others_are_still_sent(tmp_path):
+    reporter, _ = _reporter(tmp_path, Clock(), private=[_Crashing("Service North"), Sender("Service Other")])
+    asked = reporter.report(21.49, lat=0.0, lon=0.0, accuracy_m=10)
+    assert reporter.confirm(asked["token"])["say"] == (
+        "Not sent to Service North: it failed. The log says why. Sent to Service Other."
+    )
+
+
+def test_when_the_own_list_refuses_the_report_and_the_undo_say_why(tmp_path):
+    local = _Refusing(tmp_path / "state", keep=KEEP)
+    reporter = Reporter(FakeSource(now=NOW), Sinks(local, []), now=Clock())
+    expected = "Your own list's folder is open to others. Fix it with chmod go-rwx."
+    assert reporter.report(21.49, lat=0.0, lon=0.0, accuracy_m=10) == {"success": False, "say": expected}
+    assert reporter.undo() == {"success": False, "say": expected}
+
+
+def test_with_no_station_list_to_hand_a_report_says_so_and_saves_nothing(tmp_path):
+    local = LocalSink(tmp_path / "state", keep=KEEP)
+    reporter = Reporter(FakeSource(now=NOW, failing=True), Sinks(local, []), now=Clock())
+    answer = reporter.report(21.49, lat=0.0, lon=0.0, accuracy_m=10)
+    assert answer["say"] == "The station list isn't available right now. Try again in a few minutes."
+    assert local.recent(Fuel.DIESEL, NOW) == []
+
+
+def test_own_reports_that_can_t_be_placed_are_left_out_and_the_source_still_answers(tmp_path):
+    clock = Clock()
+    refusing = OwnReports(
+        FakeSource(now=NOW), _Refusing(tmp_path, keep=KEEP), FakeSource(now=NOW), counts_for=KEEP, now=clock
+    )
+    local = LocalSink(tmp_path / "state", keep=KEEP)
+    local.take(_own(18.00, 10, station="fake_gone", name="Fake Fuel Gone"))  # a station no longer listed
+    unlisted = OwnReports(FakeSource(now=NOW), local, FakeSource(now=NOW), counts_for=KEEP, now=clock)
+    no_list = OwnReports(
+        FakeSource(now=NOW), local, FakeSource(now=NOW, failing=True), counts_for=KEEP, now=clock
+    )
+    for source in (refusing, unlisted, no_list):
+        answer = FuelService(source, now=clock).price(Fuel.DIESEL, lat=0.0, lon=0.0, accuracy_m=10)
+        assert answer["say"].startswith("Diesel is cheapest at Fake Fuel Beta, nineteen seventy-nine")
