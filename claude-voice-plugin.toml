@@ -1,0 +1,10 @@
+# What the voice's installer reads to start this plugin and list its tools.
+# The format is claude-voice's plugin manifest, version 1; tests/test_manifest.py
+# holds this file to that format and to the tools the server really offers.
+manifest = 1
+name = "fuel"
+command = "uv"
+args = ["run", "fuel-mcp", "serve"]
+tools = ["fuel_price", "fuel_report", "fuel_report_undo", "fuel_report_confirm"]
+timeout = 30
+branch = "main"
