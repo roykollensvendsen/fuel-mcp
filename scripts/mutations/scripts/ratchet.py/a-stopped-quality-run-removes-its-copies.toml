@@ -1,0 +1,5 @@
+[[rule]]
+name = "a stopped quality run removes its copies"
+file = "scripts/ratchet.py"
+find = 'raise SystemExit\(128 \+ signum\)'
+replace = 'os._exit(128 + signum)'
