@@ -491,6 +491,11 @@ def base_levels(kept: Path | None, measure_base: Callable[[], dict[str, Any]]) -
     return measure_base()
 
 
+#: Fetching a commit by its sha works only where the protocol allows it, and a user's git
+#: settings may not. These settings make it work whatever they say.
+PINNED = ("-c", "protocol.version=2", "-c", "uploadpack.allowAnySHA1InWant=true")
+
+
 def copy_of(ref: str, copy: Path) -> None:
     """Check `ref` out into `copy`, a repository holding that one commit and no other ref.
 
@@ -505,7 +510,7 @@ def copy_of(ref: str, copy: Path) -> None:
     # RULE: the base is measured where no other branch can be seen
     steps = (
         ("git", "init", "-q"),
-        ("git", "fetch", "-q", "--depth", "1", str(ROOT), sha.stdout.strip()),
+        ("git", *PINNED, "fetch", "-q", "--depth", "1", str(ROOT), sha.stdout.strip()),
         ("git", "checkout", "-q", "--detach", "FETCH_HEAD"),
     )
     for step in steps:
