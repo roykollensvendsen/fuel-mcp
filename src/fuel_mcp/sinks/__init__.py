@@ -147,16 +147,27 @@ def _load(entry: PrivateSinkEntry, folder: pathlib.Path, labels: set[str]) -> Pr
     sys.path.insert(0, str(folder / "src"))
     try:
         module = importlib.import_module(module_name)
-    except Exception as error:  # noqa: BLE001 - any failure at all means not loaded
+    except (Exception, SystemExit) as error:  # noqa: BLE001 - an exit too: it would end the plugin
         by_hand = f"cd {folder}/src; python -c 'import {module_name}'"
         msg = f"importing it raised {type(error).__name__}. Try it by hand: {by_hand}"
         raise NotLoadedError(msg) from None
     finally:
         # RULE: the loader leaves sys.path as it found it
         sys.path[:] = saved
+    try:
+        return _built(module, class_name, labels)
+    except NotLoadedError:
+        raise
+    except (Exception, SystemExit) as error:  # noqa: BLE001 - an exit too: it would end the plugin
+        msg = f"{class_name} raised {type(error).__name__} while it was built or checked"
+        raise NotLoadedError(msg) from None
+
+
+def _built(module: object, class_name: str, labels: set[str]) -> PriceSink:
+    """The sink class built with no arguments, if it is a sink."""
     kind = getattr(module, class_name, None)
     if not isinstance(kind, type):
-        msg = f"{module_name} has no class {class_name}"
+        msg = f"{getattr(module, '__name__', 'the module')} has no class {class_name}"
         raise NotLoadedError(msg)
     try:
         sink = kind()
@@ -205,7 +216,7 @@ class Sinks:
                 sink.take(report)
             except SinkRefusedError as error:
                 said[sink.label] = f"Not sent to {sink.label}: {error}"
-            except Exception as error:  # noqa: BLE001 - a sender's crash is said, never raised
+            except (Exception, SystemExit) as error:  # noqa: BLE001 - a sender's crash is said, never raised
                 log.warning("fuel-mcp: private sink %s failed: %s", sink.label, type(error).__name__)
                 said[sink.label] = f"Not sent to {sink.label}: it failed. The log says why."
             else:

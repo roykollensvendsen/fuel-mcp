@@ -211,6 +211,28 @@ def test_a_badly_named_or_missing_sink_is_refused(tmp_path, sink, said, caplog):
 
 
 @pytest.mark.parametrize(
+    "body",
+    [
+        "import sys\nsys.exit(3)\n",
+        "import sys\nclass ExampleSink:\n    def __init__(self):\n        sys.exit(3)\n",
+        (
+            "import sys\nclass ExampleSink:\n    needs_yes = True\n    take = print\n"
+            "    @property\n    def label(self):\n        sys.exit(3)\n"
+        ),
+    ],
+    ids=["on import", "when built", "when checked"],
+)
+def test_a_sink_that_exits_is_refused_and_the_server_lives_on(tmp_path, body, caplog):
+    # SystemExit isn't an Exception: caught as one, it would end the whole plugin.
+    loaded = _loaded(_private(tmp_path, body=body))
+    assert loaded == []
+    assert "SystemExit" in caplog.text
+    local = LocalSink(tmp_path / "state", keep=dt.timedelta(hours=12))
+    Sinks(local, loaded).take(REPORT, {LABEL})
+    assert local.recent(Fuel.DIESEL, NOW) == [REPORT]
+
+
+@pytest.mark.parametrize(
     ("body", "said"),
     [
         ("raise RuntimeError('broken')\n", "raised RuntimeError"),
