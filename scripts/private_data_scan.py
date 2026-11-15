@@ -15,7 +15,8 @@ staged for commit), or on the whole history:
 Both files live in ``~/.config/fuel-mcp/``, outside the repository, so the list
 itself is never published. The private list is ``private.toml``, holding
 ``words = ["...", ...]``. In CI neither file exists, so there only the patterns
-are checked; the commit hook is what checks home and the list.
+are checked; the commit hook is what checks home and the list. A file that
+exists but cannot be read stops the scan, so its words never go unchecked.
 
 What is found is reported by kind and line, never quoted, since the report may
 land in a public log.
@@ -60,27 +61,49 @@ def config_folder(env: dict[str, str] | os._Environ[str]) -> pathlib.Path:
     return pathlib.Path(base).expanduser() / "fuel-mcp"
 
 
+class PrivateFileError(Exception):
+    """A private file exists but cannot be used, so what it holds would go unchecked."""
+
+    def __init__(self, path: pathlib.Path) -> None:
+        """`path` is named in the message; its contents never are."""
+        super().__init__(f"{path} is not in the form this check reads, so nothing was checked against it")
+        self.path = path
+
+
 def _toml(path: pathlib.Path) -> dict[str, object]:
+    """The file's table; a missing file is empty, and a broken one refuses."""
+    if not path.exists():
+        return {}
     try:
         with path.open("rb") as file:
             return tomllib.load(file)
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
+        raise PrivateFileError(path) from None
+
+
+def _number(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def private_values(folder: pathlib.Path) -> set[str]:
-    """Home, to about 100 m, and the owner's private words, from files outside the repository."""
+    """Home, to about 100 m, and the owner's private words, from files outside the repository.
+
+    A file that exists but cannot be read as expected raises PrivateFileError: a
+    broken list must stop the commit, never let its words through unchecked.
+    """
     out: set[str] = set()
-    listed = _toml(folder / "private.toml").get("words", [])
-    if isinstance(listed, list):
-        out |= {w for w in listed if isinstance(w, str) and len(w) >= MIN_WORD}
-    home = _toml(folder / "config.toml").get("home")
-    if isinstance(home, dict):
-        for key in ("lat", "lon"):
-            value = home.get(key)
-            if isinstance(value, int | float) and not isinstance(value, bool):
-                scale = 10**HOME_DECIMALS
-                out.add(f"{math.trunc(value * scale) / scale:.{HOME_DECIMALS}f}")
+    words = folder / "private.toml"
+    listed = _toml(words).get("words", [])
+    if not isinstance(listed, list) or not all(isinstance(w, str) for w in listed):
+        raise PrivateFileError(words)
+    out |= {w for w in listed if len(w) >= MIN_WORD}
+    config = folder / "config.toml"
+    home = _toml(config).get("home")
+    if home is not None:
+        if not isinstance(home, dict) or not all(_number(home.get(k)) for k in ("lat", "lon")):
+            raise PrivateFileError(config)
+        scale = 10**HOME_DECIMALS
+        out |= {f"{math.trunc(float(home[k]) * scale) / scale:.{HOME_DECIMALS}f}" for k in ("lat", "lon")}
     return out
 
 
@@ -127,7 +150,7 @@ def _texts(*, tracked: bool, history: bool) -> list[tuple[str, str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Scan the staged files, every tracked file, or the history; 1 when anything is found."""
+    """Scan the staged files, every tracked file, or the history; 1 on a finding, 2 when it cannot."""
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--tracked", action="store_true", help="scan every tracked file")
     parser.add_argument("--history", action="store_true", help="scan every commit on every branch")
@@ -136,7 +159,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     folder = pathlib.Path(args.config_dir).expanduser() if args.config_dir else config_folder(os.environ)
-    private = private_values(folder)
+    try:
+        private = private_values(folder)
+    except PrivateFileError as error:
+        sys.stderr.write(f"private data scan: {error}; fix it, or move it aside.\n")
+        return 2
     bad = 0
     for where, text in _texts(tracked=args.tracked, history=args.history):
         for offence in offences(text, private):

@@ -5,6 +5,8 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "scripts"))
 
 import private_data_scan
@@ -50,11 +52,29 @@ def test_the_private_list_is_read_from_local_config(tmp_path):
     assert private_data_scan.private_values(folder) == {"Made-up Pump Nordbyen"}
 
 
-def test_a_missing_or_broken_config_holds_nothing(tmp_path):
+def test_missing_config_files_hold_nothing(tmp_path):
     assert private_data_scan.private_values(tmp_path / "absent") == set()
-    (tmp_path / "config.toml").write_text("not = [toml")
-    (tmp_path / "private.toml").write_text("words = 3")
-    assert private_data_scan.private_values(tmp_path) == set()
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("private.toml", "words = [not toml"),
+        ("private.toml", "words = 3"),
+        ("private.toml", 'words = ["fine", 4]'),
+        ("config.toml", "[home]\nlat = [broken"),
+        ("config.toml", '[home]\nlat = "north"\nlon = 0.0\n'),
+    ],
+    ids=["list not toml", "words not a list", "a word not text", "config not toml", "home not numbers"],
+)
+def test_a_broken_private_file_refuses_the_commit_without_quoting_it(tmp_path, capsys, name, text):
+    (tmp_path / name).write_text(text)
+    assert private_data_scan.main(["--config-dir", str(tmp_path)]) == 2
+    err = capsys.readouterr().err
+    assert err.count("\n") == 1
+    assert str(tmp_path / name) in err
+    assert "north" not in err
+    assert "not toml" not in err
 
 
 def test_ordinary_text_and_documentation_addresses_are_allowed():
