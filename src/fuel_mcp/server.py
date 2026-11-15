@@ -47,16 +47,20 @@ def build_server(service: FuelService, *, simulated: bool = False) -> MCPServer[
     )
     async def fuel_price(
         fuel: Annotated[
-            Literal["diesel", "petrol95", "petrol98"],
-            Field(description="The fuel: diesel, petrol95 or petrol98. Diesel when the user names none."),
-        ] = "diesel",
+            Literal["diesel", "petrol95", "petrol98"] | None,
+            Field(
+                description="The fuel: diesel, petrol95 or petrol98. Leave it out when the user names none."
+            ),
+        ] = None,
         lat: Annotated[float | None, Field(description="The phone's latitude, if known.")] = None,
         lon: Annotated[float | None, Field(description="The phone's longitude, if known.")] = None,
         accuracy_m: Annotated[
             float | None, Field(description="How exact the position is, in metres; 100 if not given.")
         ] = None,
     ) -> dict[str, Any]:
-        ask = functools.partial(service.price, Fuel(fuel), lat=lat, lon=lon, accuracy_m=accuracy_m)
+        ask = functools.partial(
+            service.price, Fuel(fuel) if fuel else None, lat=lat, lon=lon, accuracy_m=accuracy_m
+        )
         answer = await asyncio.to_thread(ask)
         return simulated_answer(answer) if simulated else answer
 

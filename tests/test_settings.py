@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The owner's local settings: home, and which price sources are switched on."""
 
+import datetime as dt
 import pathlib
 import subprocess
 import sys
@@ -8,6 +9,7 @@ import sys
 import pytest
 
 from fuel_mcp import cli
+from fuel_mcp.model import Fuel
 from fuel_mcp.settings import (
     SettingsError,
     build_source,
@@ -15,6 +17,9 @@ from fuel_mcp.settings import (
     config_folder,
     load_settings,
 )
+from fuel_mcp.simulator import FakeSource
+
+NOW = dt.datetime(2030, 1, 1, 12, 0, tzinfo=dt.UTC)
 
 
 def _config(tmp_path, text):
@@ -150,3 +155,23 @@ def test_the_real_price_uses_home_and_the_hourly_copy(tmp_path, monkeypatch, cap
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     assert cli.main(["price"]) == 0
     assert capsys.readouterr().out.startswith("Diesel is cheapest at Made-up East, nineteen seventy-nine")
+
+
+def test_the_owners_default_fuel_is_read_from_the_config(tmp_path):
+    assert load_settings(tmp_path / "absent").fuel is Fuel.DIESEL
+    folder = _config(tmp_path, 'fuel = "petrol95"\n[home]\nlat = 0.0\nlon = 0.0\n')
+    assert load_settings(folder).fuel is Fuel.PETROL95
+
+
+@pytest.mark.parametrize("line", ['fuel = "petrol"', "fuel = 95"])
+def test_an_unknown_default_fuel_names_the_known_ones_and_the_file(tmp_path, line):
+    with pytest.raises(SettingsError, match=r"diesel, petrol95, petrol98\. Fix fuel in .*config\.toml"):
+        load_settings(_config(tmp_path, line + "\n"))
+
+
+def test_the_owners_default_fuel_reaches_the_answer(tmp_path, monkeypatch, capsys):
+    folder = _config(tmp_path, 'fuel = "petrol98"\nsources = []\n')
+    monkeypatch.setattr(cli, "config_folder", lambda _env: folder)
+    monkeypatch.setattr(cli, "build_source", lambda _s, _c: FakeSource(now=NOW))
+    assert cli.main(["price", "--lat", "0", "--lon", "0"]) == 0
+    assert capsys.readouterr().out.startswith("Petrol 98 is cheapest")

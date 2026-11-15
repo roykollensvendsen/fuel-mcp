@@ -28,7 +28,17 @@ def _service(*, simulate: bool) -> FuelService:
         build_source(settings, cache_folder(os.environ)),
         home=settings.home,
         config_file=str(folder / "config.toml"),
+        fuel=settings.fuel,
     )
+
+
+def _fuel(text: str) -> Fuel:
+    """A fuel named on the command line; a wrong one is told the known ones."""
+    try:
+        return Fuel(text)
+    except ValueError:
+        msg = f"unknown fuel {text!r}; the known ones are {', '.join(Fuel)}"
+        raise argparse.ArgumentTypeError(msg) from None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -36,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="fuel-mcp", description=__doc__)
     parser.add_argument("command", choices=COMMANDS, help="serve: MCP over stdio; price: read once")
     parser.add_argument("--simulate", action="store_true", help="use made-up stations; touches no network")
-    parser.add_argument("--fuel", choices=[f.value for f in Fuel], default=Fuel.DIESEL.value)
+    parser.add_argument("--fuel", type=_fuel, choices=list(Fuel), help="by default the one in the settings")
     parser.add_argument("--lat", type=float, help="latitude of the point to search around")
     parser.add_argument("--lon", type=float, help="longitude of the point to search around")
     parser.add_argument("--accuracy-m", type=float, help="how exact the point is, in metres")
@@ -47,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(f"{error}\n")
         return 1
     if args.command == "price":
-        answer = service.price(Fuel(args.fuel), lat=args.lat, lon=args.lon, accuracy_m=args.accuracy_m)
+        answer = service.price(args.fuel, lat=args.lat, lon=args.lon, accuracy_m=args.accuracy_m)
         if args.simulate:
             answer = simulated_answer(answer)
         sys.stdout.write(f"{answer['say']}\n{answer['credit']}\n")
