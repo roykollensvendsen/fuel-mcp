@@ -44,6 +44,13 @@ def test_home_from_local_config_is_never_committed(tmp_path):
     assert private_data_scan.offences("lon: " + "8.77" + "2", found)
 
 
+def test_home_written_rounded_is_never_committed(tmp_path):
+    (tmp_path / "config.toml").write_text("[home]\nlat = " + "58.62" + "19\nlon = 0.0\n")
+    found = private_data_scan.private_values(tmp_path)
+    assert private_data_scan.offences("lat = " + "58.62" + "2", found)
+    assert private_data_scan.offences("lat = " + "58.62" + "1", found)
+
+
 def test_the_private_list_is_read_from_local_config(tmp_path):
     folder = tmp_path / "fuel-mcp"
     folder.mkdir()

@@ -88,8 +88,15 @@ def _number(value: object) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
+def _home_forms(value: float) -> set[str]:
+    """Home to about 100 m, cut short and rounded, since either may be written."""
+    scale = 10**HOME_DECIMALS
+    cut = math.trunc(value * scale) / scale
+    return {f"{cut:.{HOME_DECIMALS}f}", f"{value:.{HOME_DECIMALS}f}"}
+
+
 def private_values(folder: pathlib.Path) -> set[str]:
-    """Home, to about 100 m, and the owner's private words, from files outside the repository.
+    """Home, to about 100 m either way, and the owner's private words, from files outside the repository.
 
     A file that exists but cannot be read as expected raises PrivateFileError: a
     broken list must stop the commit, never let its words through unchecked.
@@ -105,8 +112,7 @@ def private_values(folder: pathlib.Path) -> set[str]:
     if home is not None:
         if not isinstance(home, dict) or not all(_number(home.get(k)) for k in ("lat", "lon")):
             raise PrivateFileError(config)
-        scale = 10**HOME_DECIMALS
-        out |= {f"{math.trunc(float(home[k]) * scale) / scale:.{HOME_DECIMALS}f}" for k in ("lat", "lon")}
+        out |= {form for k in ("lat", "lon") for form in _home_forms(float(home[k]))}
     return out
 
 
