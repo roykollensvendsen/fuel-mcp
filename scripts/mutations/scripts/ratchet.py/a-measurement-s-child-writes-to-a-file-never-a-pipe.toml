@@ -1,0 +1,5 @@
+[[rule]]
+name = "a measurement's child writes to a file never a pipe"
+file = "scripts/ratchet.py"
+find = '^            stdout=out,$'
+replace = 'stdout=subprocess.PIPE,'

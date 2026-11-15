@@ -298,7 +298,39 @@ def _run(
     cwd: Path = ROOT,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, cwd=cwd, env=env, capture_output=True, text=True, check=False)  # noqa: S603
+    """Run a command and wait for it; stopped meanwhile, give it Ctrl-C and wait again.
+
+    subprocess.run would kill it outright: a rule check would leave a file switched off,
+    and the suite its files. The command gets a session of its own, so a terminal's
+    Ctrl-C reaches it only through this run, and once. Its output goes to files, not
+    pipes: after a kill -9 of this run, a pipe would end it at its next write.
+
+    The wait after that Ctrl-C has no time limit, on purpose: these runs are never cut
+    short. Should the command hang there, end it and its group with
+    kill -9 -- -<its pid>; the next rule check then puts its file back.
+    """
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        child = subprocess.Popen(  # noqa: S603 - the commands are this script's own
+            command,
+            cwd=cwd,
+            env=env,
+            # RULE: a measurement's child writes to a file never a pipe
+            stdout=out,
+            stderr=err,
+            # RULE: a terminal's Ctrl-C reaches a measurement's child only once
+            start_new_session=True,
+        )
+        try:
+            child.wait()
+        except BaseException:
+            # RULE: a stopped measurement lets its child clean up
+            child.send_signal(signal.SIGINT)
+            child.wait()
+            raise
+        out.seek(0)
+        err.seek(0)
+        said, complained = (part.read().decode("utf-8", "replace") for part in (out, err))
+    return subprocess.CompletedProcess(command, child.returncode, said, complained)
 
 
 def measure(*, skip_mutation: bool = False, recorded: dict[str, Any] | None = None) -> dict[str, Any]:
