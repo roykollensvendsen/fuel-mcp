@@ -56,3 +56,9 @@ name = "a price time with no offset is read as norwegian time"
 file = "src/fuel_mcp/sources/drivstoffpriser.py"
 find = 'return moment.replace\(tzinfo=NORWAY\).astimezone\(dt.UTC\)'
 replace = 'return moment.replace(tzinfo=dt.UTC)'
+
+[[rule]]
+name = "no price source is on until the owner lists one"
+file = "src/fuel_mcp/settings.py"
+find = 'DEFAULT_SOURCES: tuple\[str, \.\.\.\] = \(\)'
+replace = 'DEFAULT_SOURCES: tuple[str, ...] = ("drivstoffpriser",)'

@@ -25,8 +25,13 @@ DEFAULT_ACCURACY_M = 100.0
 #: How long a price may be said as today's; an older one is said with its date.
 CURRENT_FOR = dt.timedelta(days=7)
 
-NO_SOURCE = "No fuel price source is switched on; see the fuel plugin's README."
-WHERE = "Where are you? Share your position, or set home in the fuel plugin's config."
+#: Where the owner's settings are, when nothing more exact is known.
+CONFIG_FILE = "~/.config/fuel-mcp/config.toml"
+NO_SOURCE = (
+    "No fuel price source is switched on. "
+    'To use Drivstoffpriser, add sources = ["drivstoffpriser"] to {file}.'
+)
+WHERE = "Where are you? Share your position, or add [home] with lat and lon to {file}."
 
 Answer = dict[str, Any]
 
@@ -40,11 +45,13 @@ class FuelService:
         *,
         now: Callable[[], dt.datetime] | None = None,
         home: tuple[float, float] | None = None,
+        config_file: str = CONFIG_FILE,
     ) -> None:
         """`home` is used when the voice gives no position; no `source` means none is switched on."""
         self._source = source
         self._now = now or (lambda: dt.datetime.now(dt.UTC))
         self._home = home
+        self._config_file = config_file
 
     def price(
         self,
@@ -55,10 +62,10 @@ class FuelService:
     ) -> Answer:
         """The cheapest `fuel` near the point, or near home, as an answer to read aloud."""
         if self._source is None:
-            return _answer(NO_SOURCE)
+            return _answer(NO_SOURCE.format(file=self._config_file))
         point = (lat, lon) if lat is not None and lon is not None else self._home
         if point is None:
-            return _answer(WHERE)
+            return _answer(WHERE.format(file=self._config_file))
         radius_km = SEARCH_KM + (accuracy_m if accuracy_m is not None else DEFAULT_ACCURACY_M) / 1000
         try:
             prices = self._source.prices_near(point[0], point[1], radius_km, fuel)

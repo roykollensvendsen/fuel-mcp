@@ -22,8 +22,13 @@ def _service(*, simulate: bool) -> FuelService:
     """The made-up stations, or the sources the local settings switch on, with home."""
     if simulate:
         return FuelService(FakeSource())
-    settings = load_settings(config_folder(os.environ))
-    return FuelService(build_source(settings, cache_folder(os.environ)), home=settings.home)
+    folder = config_folder(os.environ)
+    settings = load_settings(folder)
+    return FuelService(
+        build_source(settings, cache_folder(os.environ)),
+        home=settings.home,
+        config_file=str(folder / "config.toml"),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
