@@ -481,25 +481,26 @@ def measure_at(ref: str) -> dict[str, Any]:
         return dict(json.loads(out.read_text()))
 
 
-#: The signals that stop a run from outside: a cancelled CI job, and a closed terminal.
-STOPS = (signal.SIGTERM, signal.SIGHUP)
+STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 def stop_cleanly() -> None:
-    """Make a stop from outside run every `finally`, so the copies in the temporary folder go too.
+    """Let a run told to stop put away the base's copy and its temporary folder first.
 
-    CI cancels a job with SIGTERM, and a closed terminal sends SIGHUP; by default either ends
-    the process at once and leaves the base's copy and its measures in the shared temporary
-    folder. Once stopping, every further stop is ignored, so the cleanup runs to its end.
+    By default a signal ends Python at once, with no `finally` run. Ctrl-C (SIGINT), a
+    closed terminal (SIGHUP) and `kill` or GitHub's cancel (SIGTERM, after a SIGINT)
+    each end the run here through `finally` instead. The first signal ignores the
+    rest, so a second one cannot land inside the cleanup and cut it short.
     """
 
     def stop(signum: int, _frame: object) -> None:
-        for each in (*STOPS, signal.SIGINT):
+        for each in STOPS:
+            # RULE: a second signal cannot cut the cleanup short of a measurement
             signal.signal(each, signal.SIG_IGN)
-        # RULE: a stopped quality run removes its copies
         raise SystemExit(128 + signum)
 
     for each in STOPS:
+        # RULE: a stopped measurement removes its copy
         signal.signal(each, stop)
 
 
