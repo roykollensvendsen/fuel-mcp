@@ -28,6 +28,10 @@ $ uv run fuel-mcp serve --simulate < /dev/null
 | `fuel_report_undo` | Takes your latest report back, within 10 minutes. |
 | `fuel_report_confirm` | Sends the report on, only after your yes to its question. |
 
+`claude-voice-plugin.toml` tells the voice's installer how to start the server
+and which tools it serves. A test holds it to the installer's format and to the
+tools the server really offers.
+
 It takes `fuel` (`diesel`, `petrol95` or `petrol98`), and the
 phone's position as `lat`, `lon` and `accuracy_m`. The search widens by the
 position's accuracy, which is taken as 100 m when not given.
