@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 SEARCH_KM = 5.0
 #: The accuracy assumed when the voice gives none; the phone's precise mode reports about this.
 DEFAULT_ACCURACY_M = 100.0
+#: Kroner per litre a pump could show; a price outside was mistyped, in øre or with a digit too many.
+PLAUSIBLE_KR = (10.0, 40.0)
 #: How long a price may be said as today's; an older one is said with its date.
 CURRENT_FOR = dt.timedelta(days=7)
 
@@ -71,7 +73,12 @@ class FuelService:
             prices = self._source.prices_near(point[0], point[1], radius_km, fuel)
         except SourceUnavailableError:
             return _answer(f"{self._source.label}'s data isn't available right now.")
-        near = [(p, distance_km(point[0], point[1], p.lat, p.lon)) for p in prices if p.fuel == fuel]
+        low, high = PLAUSIBLE_KR
+        near = [
+            (p, distance_km(point[0], point[1], p.lat, p.lon))
+            for p in prices
+            if p.fuel == fuel and low <= p.price <= high
+        ]
         # RULE: a station beyond the search radius is never chosen
         near = [(p, km) for p, km in near if km <= radius_km]
         if not near:
