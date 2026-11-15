@@ -81,6 +81,7 @@ def _toml(path: pathlib.Path) -> dict[str, object]:
         with path.open("rb") as file:
             return tomllib.load(file)
     except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
+        # RULE: a broken private file refuses the commit never skips the check
         raise PrivateFileError(path) from None
 
 

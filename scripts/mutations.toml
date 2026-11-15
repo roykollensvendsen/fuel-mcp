@@ -74,3 +74,9 @@ name = "a rough position widens the search by two kilometres at most"
 file = "src/fuel_mcp/service.py"
 find = 'widen_m = min\(max\(accuracy, 0.0\), WIDEST_ACCURACY_M\)'
 replace = 'widen_m = accuracy'
+
+[[rule]]
+name = "a broken private file refuses the commit never skips the check"
+file = "scripts/private_data_scan.py"
+find = 'raise PrivateFileError\(path\) from None'
+replace = 'return {}'
