@@ -34,6 +34,10 @@ class Clock:
         self.now += dt.timedelta(**delta)
 
 
+#: The longest a silent sender in these tests stays silent, in seconds: far past any deadline set here.
+SILENT_S = 5
+
+
 class Sender:
     """A made-up private sender that keeps what it is given, or refuses, or is slow."""
 
@@ -48,7 +52,9 @@ class Sender:
         if self._slow_s:
             time.sleep(self._slow_s)
         if self._held is not None:
-            self._held.wait()  # until the test lets go: a sender that hasn't answered yet
+            # Until the test lets go: a sender that hasn't answered yet. It answers after
+            # SILENT_S at the latest, so a lost deadline fails a test instead of hanging it.
+            self._held.wait(SILENT_S)
         if self._refuse:
             msg = "you've reported there 5 times today"
             raise SinkRefusedError(msg)
