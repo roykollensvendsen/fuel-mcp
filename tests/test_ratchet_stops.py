@@ -50,16 +50,20 @@ spec.loader.exec_module(ratchet)
 ratchet.stop_cleanly()
 with tempfile.TemporaryDirectory() as copy:
     open(os.path.join(copy, "levels.json"), "w").close()
-    ratchet._run(sys.executable, "-c", sys.argv[2], sys.argv[3], sys.argv[4])
+    ratchet._run(*sys.argv[5:], "-c", sys.argv[2], sys.argv[3], sys.argv[4])
 """
 
+#: How the stand-in starts its child: straight, or through uv, as the ratchet starts its own.
+STRAIGHT = (sys.executable,)
+THROUGH_UV = ("uv", "run", "--no-project", "python")
 
-def _ratchet(tmp_path, mode="stop", *, own_group=False):
+
+def _ratchet(tmp_path, mode="stop", *, own_group=False, starts=STRAIGHT):
     temp, marks = tmp_path / "temp", tmp_path / "marks"
     temp.mkdir()
     marks.mkdir()
     ratchet = subprocess.Popen(
-        [sys.executable, "-c", RATCHET, str(ROOT / "scripts/ratchet.py"), CHILD, str(marks), mode],
+        [sys.executable, "-c", RATCHET, str(ROOT / "scripts/ratchet.py"), CHILD, str(marks), mode, *starts],
         env={**os.environ, "TMPDIR": str(temp)},
         stdout=subprocess.DEVNULL,
         stderr=(tmp_path / "said").open("w"),
@@ -117,6 +121,19 @@ def test_a_terminal_s_ctrl_c_reaches_a_measurement_s_child_only_once(tmp_path):
     assert (marks / "cleaned").read_text() == "1"
 
 
+def test_a_stopped_measurement_tells_the_python_under_uv_once(tmp_path):
+    """The ratchet starts its steps through uv, and uv passes a Ctrl-C on to its own child.
+
+    Sent to uv's whole process group instead, the stop would reach that child twice, and a
+    second Ctrl-C cuts pytest's cleanup short. So the stop goes to the step alone.
+    """
+    ratchet, temp, marks = _ratchet(tmp_path, starts=THROUGH_UV)
+    ratchet.send_signal(signal.SIGINT)
+    _ended(ratchet)
+    assert (marks / "cleaned").read_text() == "1"  # once, not twice
+    assert list(temp.iterdir()) == []
+
+
 def test_a_measurement_s_child_writes_to_a_file_never_a_pipe(tmp_path):
     """After a kill -9 of the ratchet, a child writing to a pipe would die mid-mutation."""
     ratchet, _, marks = _ratchet(tmp_path, "orphan")
@@ -127,15 +144,15 @@ def test_a_measurement_s_child_writes_to_a_file_never_a_pipe(tmp_path):
     assert (marks / "finished").exists(), "the child died once the ratchet was gone"
 
 
-def test_a_step_already_gone_when_the_stop_comes_is_not_an_error(monkeypatch):
-    """The step may end between the stop and the signal; the stop still ends the run as a stop."""
+def _unreachable_step(monkeypatch, *, ended):
+    """The ratchet, with a step the stop's signal cannot find, which has or has not ended."""
     import importlib.util  # noqa: PLC0415
 
     spec = importlib.util.spec_from_file_location("ratchet_gone", ROOT / "scripts/ratchet.py")
     ratchet = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ratchet)
 
-    class Gone:
+    class Step:
         pid = 2**22 + 1  # above any pid the kernel gives out
         returncode = 0
         waits = 0
@@ -144,15 +161,38 @@ def test_a_step_already_gone_when_the_stop_comes_is_not_an_error(monkeypatch):
             pass
 
         def wait(self):
-            Gone.waits += 1
-            if Gone.waits == 1:
+            Step.waits += 1
+            if Step.waits == 1:
                 raise KeyboardInterrupt
             return 0
 
-    monkeypatch.setattr(ratchet.subprocess, "Popen", Gone)
+        def send_signal(self, _signum):
+            raise ProcessLookupError
+
+        def poll(self):
+            return 0 if ended else None
+
+    monkeypatch.setattr(ratchet.subprocess, "Popen", Step)
+    return ratchet, Step
+
+
+def test_a_step_already_gone_when_the_stop_comes_is_not_an_error(monkeypatch):
+    """The step may end between the stop and the signal; the stop still ends the run as a stop."""
+    ratchet, step = _unreachable_step(monkeypatch, ended=True)
     with pytest.raises(KeyboardInterrupt):
         ratchet._run("true")  # noqa: SLF001 - the step runner under test
-    assert Gone.waits == 2, "it still waits for the step"
+    assert step.waits == 2, "it still waits for the step"
+
+
+def test_a_live_step_the_stop_cannot_reach_is_an_error(monkeypatch):
+    """Only a step that has ended may be missed: a live one that never heard the stop would run on."""
+    ratchet, _ = _unreachable_step(monkeypatch, ended=False)
+    raised: BaseException | None = None
+    try:
+        ratchet._run("true")  # noqa: SLF001 - the step runner under test
+    except BaseException as stop:  # noqa: BLE001 - the stop itself must not end the suite
+        raised = stop
+    assert isinstance(raised, ProcessLookupError), raised
 
 
 def test_a_stopped_measurement_names_the_kill_for_a_step_that_hangs(tmp_path):
