@@ -1,0 +1,5 @@
+[[rule]]
+name = "a live step the stop cannot reach is an error"
+file = "scripts/ratchet.py"
+find = '^                    raise$'
+replace = 'pass'
