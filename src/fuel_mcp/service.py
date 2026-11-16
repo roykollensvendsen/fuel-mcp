@@ -102,11 +102,7 @@ class FuelService:
         point = (lat, lon) if lat is not None and lon is not None else self._home
         if point is None:
             return _answer(WHERE.format(file=self._config_file))
-        accuracy = DEFAULT_ACCURACY_M if accuracy_m is None else accuracy_m
-        # RULE: a rough position widens the search by two kilometres at most
-        widen_m = min(max(accuracy, 0.0), WIDEST_ACCURACY_M)
-        rough = "Your position is rough. " if accuracy > WIDEST_ACCURACY_M else ""
-        steps = search_steps(self._farthest_km, widen_m / 1000)
+        rough, steps = _search(self._farthest_km, accuracy_m)
         radius_km = steps[-1]
         try:
             prices = self._source.prices_near(point[0], point[1], radius_km, fuel)
@@ -116,17 +112,21 @@ class FuelService:
                 f"{self._source.label}'s data isn't available right now. Try again in a few minutes."
             )
         prices, estimates = newest_reported(prices)
-        low, high = PLAUSIBLE_KR
-        near = [
-            (p, distance_km(point[0], point[1], p.lat, p.lon))
-            for p in prices
-            if p.fuel == fuel and low <= p.price <= high
-        ]
-        # RULE: a station beyond the search radius is never chosen
-        near = [(p, km) for p, km in near if km <= radius_km]
+        near = _near(prices, fuel, point, radius_km)
         if not near:
             nothing = f"I can't see a {fuel.spoken.lower()} price within {round(radius_km)} kilometres."
             return _answer(nothing + _estimate_said(estimates, point, radius_km, None))
+        return self._cheapest(fuel, near, steps, rough, (estimates, point))
+
+    def _cheapest(
+        self,
+        fuel: Fuel,
+        near: list[tuple[StationPrice, float]],
+        steps: list[float],
+        rough: str,
+        guesses: tuple[list[StationPrice], tuple[float, float]],
+    ) -> Answer:
+        """The answer once some price is near: the cheapest current one, or else only the latest."""
         now = self._now()
         # A phone with a fast clock can report a price from the future; it is taken as just now.
         near = [(dataclasses.replace(p, updated_at=min(p.updated_at, now)), km) for p, km in near]
@@ -135,11 +135,12 @@ class FuelService:
         found = _first_step(current, steps)
         if found is None:
             latest, km = max(near, key=lambda pk: (pk[0].updated_at, -pk[1]))
-            say = self._only_old(fuel, latest, km, radius_km, now)
+            say = self._only_old(fuel, latest, km, steps[-1], now)
             return _answer(rough + say, station=_station(latest, km, current=False))
         widened, in_step = found
         best, km = min(in_step, key=lambda pk: (round(pk[0].price, 2), pk[1]))
         name = spoken_name(best.name, best.brand)
+        estimates, point = guesses
         say = (
             widened
             + f"{fuel.spoken} is cheapest at {name}, {spoken_price(best.price)}, {spoken_distance(km)}. "
@@ -179,6 +180,29 @@ def search_steps(farthest_km: float, widen_km: float = 0.0) -> list[float]:
     # RULE: the search never goes past the farthest distance set
     steps.append(farthest_km)
     return [s + widen_km for s in steps]
+
+
+def _search(farthest_km: float, accuracy_m: float | None) -> tuple[str, list[float]]:
+    """How rough the position is, said, and the distances to search in turn."""
+    accuracy = DEFAULT_ACCURACY_M if accuracy_m is None else accuracy_m
+    # RULE: a rough position widens the search by two kilometres at most
+    widen_m = min(max(accuracy, 0.0), WIDEST_ACCURACY_M)
+    rough = "Your position is rough. " if accuracy > WIDEST_ACCURACY_M else ""
+    return rough, search_steps(farthest_km, widen_m / 1000)
+
+
+def _near(
+    prices: list[StationPrice], fuel: Fuel, point: tuple[float, float], radius_km: float
+) -> list[tuple[StationPrice, float]]:
+    """The believable prices for `fuel` within `radius_km` of the point, each with its distance."""
+    low, high = PLAUSIBLE_KR
+    near = [
+        (p, distance_km(point[0], point[1], p.lat, p.lon))
+        for p in prices
+        if p.fuel == fuel and low <= p.price <= high
+    ]
+    # RULE: a station beyond the search radius is never chosen
+    return [(p, km) for p, km in near if km <= radius_km]
 
 
 def _first_step(
