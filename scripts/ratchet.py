@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import contextlib
 import json
 import os
 import re
@@ -303,10 +302,11 @@ def _run(
 
     subprocess.run would kill it outright: a rule check would leave a file switched off,
     and the suite its files. The command gets a session of its own, so a terminal's
-    Ctrl-C reaches it only through this run, and once. A stop goes to its whole process
-    group, as a terminal's Ctrl-C would: the command is usually `uv run ...`, and the
-    program under uv must get the stop whether uv passes it on or not. Its output goes to files, not
-    pipes: after a kill -9 of this run, a pipe would end it at its next write.
+    Ctrl-C reaches it only through this run, and once. That Ctrl-C goes to the command
+    alone, not to its whole process group: the command is usually `uv run ...`, and uv
+    passes a Ctrl-C on to its own child, so one sent to the group would reach that child
+    twice. Its output goes to files, not pipes: after a kill -9 of this run, a pipe would
+    end it at its next write.
 
     The wait after that Ctrl-C has no time limit, on purpose: these runs are never cut
     short. Should the command hang there, end it and its group with
@@ -326,9 +326,14 @@ def _run(
         try:
             child.wait()
         except BaseException:
-            with contextlib.suppress(ProcessLookupError):
+            try:
                 # RULE: a stopped measurement stops its step and waits for it
-                os.killpg(child.pid, signal.SIGINT)
+                # RULE: a stopped measurement tells the python under uv once
+                child.send_signal(signal.SIGINT)  # the step alone: uv passes it on
+            except ProcessLookupError:
+                # RULE: a live step the stop cannot reach is an error
+                if child.poll() is None:  # gone only if it ended; a live step must be told
+                    raise
             sys.stderr.write(
                 f"Stopping: waiting for {command[0]} to clean up. If it hangs, end it from"
                 f" another terminal with: kill -9 -- -{child.pid}\n"

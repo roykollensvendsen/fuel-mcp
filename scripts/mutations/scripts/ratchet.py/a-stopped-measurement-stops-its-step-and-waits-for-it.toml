@@ -1,5 +1,5 @@
 [[rule]]
 name = "a stopped measurement stops its step and waits for it"
 file = "scripts/ratchet.py"
-find = '^                os\.killpg\(child\.pid, signal\.SIGINT\)$'
+find = '^                child\.send_signal\(signal\.SIGINT\)  # the step alone: uv passes it on$'
 replace = 'pass'

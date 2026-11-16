@@ -300,11 +300,12 @@ while time.monotonic() < deadline:
     time.sleep(0.05)
 """
 
-#: Stands in for `uv run`: it starts the step and passes no signal on to it.
+#: Stands in for `uv run`: it starts the step and passes a Ctrl-C on to it, as uv does.
 LAUNCHER = """
 import signal, subprocess, sys
-signal.signal(signal.SIGINT, signal.SIG_IGN)
-sys.exit(subprocess.run([sys.executable, *sys.argv[1:]]).returncode)
+step = subprocess.Popen([sys.executable, *sys.argv[1:]])
+signal.signal(signal.SIGINT, lambda signum, _frame: step.send_signal(signum))
+sys.exit(step.wait())
 """
 
 MEASURING = """
@@ -320,8 +321,8 @@ ratchet._run(sys.executable, *sys.argv[2:])
 def test_a_stopped_measurement_stops_its_step_and_waits_for_it(tmp_path):
     """Ctrl-C on the ratchet reaches its step once, through the ratchet, which then waits.
 
-    The step is started through a launcher that passes no signal on, as `uv run` may not:
-    the stop has to reach every process of the step, as Ctrl-C in a terminal would.
+    The step is started through a launcher, as `uv run` starts it. The stop goes to the
+    launcher alone, and passing it on is the launcher's own job, as it is uv's.
     """
     (tmp_path / "step.py").write_text(STEP)
     (tmp_path / "launcher.py").write_text(LAUNCHER)

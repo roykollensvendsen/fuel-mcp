@@ -1,0 +1,5 @@
+[[rule]]
+name = "a stopped measurement tells the python under uv once"
+file = "scripts/ratchet.py"
+find = '^                child\.send_signal\(signal\.SIGINT\)  # the step alone: uv passes it on$'
+replace = 'os.killpg(child.pid, signal.SIGINT)'
