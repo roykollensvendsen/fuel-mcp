@@ -271,8 +271,12 @@ def restore(path: pathlib.Path, original: str, mutated: str) -> bool:
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def run_suite() -> tuple[int, list[str]]:
-    """Run the tests and give back how many failed, and which ones."""
+# RULE: a real mutation run has no time limit
+def run_suite(timeout: float | None = None) -> tuple[int, list[str]]:
+    """Run the tests and give back how many failed, and which ones.
+
+    Only a test running a small suite of its own passes `timeout`, so a hang there fails it.
+    """
     # Two mutations that replace equal-length text leave files of identical
     # size, and CPython validates a cached .pyc from the source's modification
     # time and size -- both at one-second resolution. Inside the same second
@@ -300,6 +304,8 @@ def run_suite() -> tuple[int, list[str]]:
             cwd=ROOT,
             check=False,
             env=env,
+            # RULE: a test's scratch suite gives up at its bound
+            timeout=timeout,
         )
     finally:
         # RULE: a suite run leaves no temporary files behind
