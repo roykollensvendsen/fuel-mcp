@@ -3,10 +3,10 @@
 
 import datetime as dt
 import pathlib
-import subprocess
 import sys
 
 import pytest
+from bounded import run_bounded
 
 from fuel_mcp import cli
 from fuel_mcp.model import Fuel
@@ -121,7 +121,7 @@ def test_a_source_not_listed_is_never_imported(tmp_path):
         f"source = build_source(load_settings(pathlib.Path({str(folder)!r})), pathlib.Path('.'))\n"
         "print(source, 'fuel_mcp.sources.drivstoffpriser' in sys.modules)\n"
     )
-    out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True).stdout
+    out = run_bounded([sys.executable, "-c", probe], capture_output=True, text=True, check=True).stdout
     assert out.strip() == "None False"
 
 

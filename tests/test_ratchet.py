@@ -16,6 +16,7 @@ import sys
 import textwrap
 
 import pytest
+from bounded import run_bounded
 
 ROOT = pathlib.Path(__file__).parent.parent
 
@@ -278,7 +279,7 @@ def test_the_base_is_measured_where_no_other_branch_can_be_seen(tmp_path, monkey
     repo.mkdir()
 
     def git(*args):
-        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+        run_bounded(["git", *args], cwd=repo, check=True, capture_output=True)
 
     for args in (
         ["init", "-q", "-b", "main"],
@@ -296,7 +297,7 @@ def test_the_base_is_measured_where_no_other_branch_can_be_seen(tmp_path, monkey
     monkeypatch.setattr(ratchet, "ROOT", repo)
     copy = tmp_path / "base"
     ratchet.copy_of("main", copy)
-    seen = subprocess.run(
+    seen = run_bounded(
         ["git", "log", "--all", "--format=%s"], cwd=copy, check=True, capture_output=True, text=True
     ).stdout
     assert (copy / "notes.txt").read_text() == "main\n"
@@ -324,7 +325,7 @@ STOPPED_WHILE_MEASURING = textwrap.dedent(
 def _stop_while_measuring(tmp_path, signum):
     temp = tmp_path / "temp"
     temp.mkdir()
-    done = subprocess.run(
+    done = run_bounded(
         [sys.executable, "-c", STOPPED_WHILE_MEASURING, str(ROOT / "scripts/ratchet.py"), str(int(signum))],
         env={**os.environ, "TMPDIR": str(temp)},
         capture_output=True,
@@ -370,7 +371,7 @@ def test_the_base_is_fetched_by_its_sha_whatever_the_user_s_git_says(tmp_path, m
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(settings))
 
     def git(*args):
-        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+        run_bounded(["git", *args], cwd=repo, check=True, capture_output=True)
 
     for args in (
         ["init", "-q", "-b", "main"],

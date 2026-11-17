@@ -18,6 +18,7 @@ import sys
 import time
 
 import pytest
+from bounded import WITHIN, line_within
 
 ROOT = pathlib.Path(__file__).parent.parent
 
@@ -48,7 +49,7 @@ def _mutate(tmp_path, monkeypatch):
 
 def test_a_suite_run_leaves_no_temporary_files_behind(tmp_path, monkeypatch):
     mutate = _mutate(tmp_path, monkeypatch)
-    failed, _ = mutate.run_suite()
+    failed, _ = mutate.run_suite(timeout=WITHIN)
     assert failed == 0
     assert list(mutate.MUTATE_TMP.iterdir()) == []
 
@@ -65,7 +66,7 @@ def test_removing_a_run_s_files_never_changes_a_folder_it_links_to(tmp_path, mon
     (mutate.ROOT / "tests" / "test_links_out.py").write_text(
         f"def test_it_links_out(tmp_path):\n    (tmp_path / 'link').symlink_to({str(outside)!r})\n"
     )
-    failed, _ = mutate.run_suite()
+    failed, _ = mutate.run_suite(timeout=WITHIN)
     assert failed == 0
     assert (outside.stat().st_mode & 0o777, (outside / "kept.txt").exists()) == (0o755, True)
 
@@ -156,6 +157,13 @@ sys.exit(mutate.main())
 """
 
 
+def _output_of(child):
+    """What `child` said, for a failure's message; a child still going is killed first, never waited on."""
+    if child.poll() is None:
+        child.kill()
+    return child.communicate(timeout=WITHIN)[0]
+
+
 def _until(path, child, deadline):
     while not path.exists() and child.poll() is None and time.monotonic() < deadline:
         time.sleep(0.05)
@@ -176,13 +184,11 @@ def test_a_stopped_run_puts_the_tree_back_in_a_whole_run(tmp_path, monkeypatch, 
         stderr=subprocess.STDOUT,
         text=True,
     )
-    _until(tmp_path / "ready", child, time.monotonic() + 30)
-    assert (tmp_path / "ready").exists(), (
-        child.communicate()[0] if child.poll() is not None else "never ready"
-    )
+    _until(tmp_path / "ready", child, time.monotonic() + WITHIN)
+    assert (tmp_path / "ready").exists(), _output_of(child)
     assert (tmp_path / "project/rule.py").read_text() == "x = 2\n", "the rule was switched off"
     child.send_signal(stop)
-    out, _ = child.communicate(timeout=30)
+    out, _ = child.communicate(timeout=WITHIN)
     # Ctrl-C ends as an uncaught KeyboardInterrupt does, by Python's own SIGINT; a shell says 130.
     ended = {128 + stop, -stop} if stop == signal.SIGINT else {128 + stop}
     assert child.returncode in ended, out
@@ -213,13 +219,13 @@ def test_a_second_signal_cannot_cut_the_cleanup_short_of_a_whole_run(tmp_path, m
         stderr=subprocess.STDOUT,
         text=True,
     )
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + WITHIN
     _until(tmp_path / "ready", child, deadline)
     child.send_signal(signal.SIGINT)
     _until(tmp_path / "cleaning", child, deadline)
-    assert (tmp_path / "cleaning").exists(), child.communicate()[0]
+    assert (tmp_path / "cleaning").exists(), _output_of(child)
     child.send_signal(signal.SIGTERM)
-    out, _ = child.communicate(timeout=30)
+    out, _ = child.communicate(timeout=WITHIN)
     assert (tmp_path / "project/rule.py").read_text() == "x = 1\n", out
     assert not (tmp_path / "recovery.json").exists()
     assert not (tmp_path / "mutate-tmp").exists()
@@ -282,9 +288,10 @@ def test_one_mutation_run_per_checkout(tmp_path, monkeypatch):
         stdout=subprocess.PIPE,
         text=True,
     ) as other:
-        assert other.stdout.readline().strip() == "holding"
+        assert line_within(other.stdout, WITHIN).strip() == "holding"
         said = _refused(mutate.main)
         other.stdin.close()
+        other.wait(timeout=WITHIN)
     assert "already running" in said
     assert (mutate.ROOT / "rule.py").read_text() == "x = 1\n"
     assert not mutate.RECOVERY.exists()
@@ -333,3 +340,14 @@ def test_neither_check_imports_the_package_itself():
             for alias in node.names
         ] + [node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
         assert not [n for n in names if n.split(".")[0] == "fuel_mcp"], script
+
+
+def test_a_failure_s_message_never_waits_on_a_child_still_running():
+    """A message read from a live child would wait for as long as it lives."""
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], stdout=subprocess.PIPE, text=True
+    )
+    started = time.monotonic()
+    _output_of(child)
+    assert time.monotonic() - started < 30
+    assert child.poll() is not None

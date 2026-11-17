@@ -10,14 +10,14 @@ then fail. The same tests pass against the conftest as it is.
 import os
 import pathlib
 import shutil
-import subprocess
 import sys
 
 import pytest
+from bounded import run_bounded
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: The test files the scratch project runs, as they are here.
-COPIED = ("test_no_temp_left.py", "test_speech.py", "test_stop_handlers_kept.py")
+COPIED = ("bounded.py", "test_no_temp_left.py", "test_speech.py", "test_stop_handlers_kept.py")
 
 #: Each step, the change that turns it off, and the test that must then fail.
 SABOTAGE = {
@@ -96,7 +96,7 @@ def _scratch(tmp_path, changes):
 
 
 def _run(project, temp, *tests):
-    return subprocess.run(
+    return run_bounded(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=line", *tests],
         cwd=project,
         env={**os.environ, "TMPDIR": str(temp)},

@@ -8,9 +8,9 @@ Norway's box in a committed file is someone's home, route or local pump.
 import pathlib
 import re
 import socket
-import subprocess
 
 import pytest
+from bounded import run_bounded
 
 ROOT = pathlib.Path(__file__).parent.parent
 PAIR = re.compile(r"(-?\d{1,2}\.\d{2,})\s*[,;/ ]\s*(-?\d{1,3}\.\d{2,})")
@@ -36,7 +36,7 @@ def test_a_coordinate_pair_in_norway_is_found():
 
 
 def test_no_committed_file_holds_a_coordinate_in_norway():
-    tracked = subprocess.run(
+    tracked = run_bounded(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
         cwd=ROOT,
         capture_output=True,

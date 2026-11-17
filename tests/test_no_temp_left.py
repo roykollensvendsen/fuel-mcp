@@ -20,6 +20,7 @@ import time
 import types
 
 import pytest
+from bounded import WITHIN, line_within, run_bounded
 
 ROOT = pathlib.Path(__file__).parent.parent
 
@@ -31,7 +32,7 @@ def _files_in(folder):
 def _pytest(temp, *tests):
     """Run some of this project's tests, with its own settings, using `temp` as the temporary folder."""
     env = {**os.environ, "TMPDIR": str(temp)}
-    return subprocess.run(
+    return run_bounded(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests],
         cwd=ROOT,
         env=env,
@@ -85,9 +86,10 @@ def test_a_live_runs_folder_is_kept(tmp_path):
         stdout=subprocess.PIPE,
         text=True,
     ) as holder:
-        assert holder.stdout.readline().strip() == "holding"
+        assert line_within(holder.stdout, WITHIN).strip() == "holding"
         done = _pytest(temp, "tests/test_speech.py")
         holder.stdin.close()
+        holder.wait(timeout=WITHIN)
     assert done.returncode == 0, done.stdout
     assert _files_in(temp) == [f"{live.name}/.lock", f"{live.name}/kept"]  # untouched
 
@@ -112,7 +114,7 @@ def test_a_tests_temporary_files_go_in_the_runs_own_folder(tmp_path):
     assert re.fullmatch(r"fuel-mcp-tests-\d+", run.name)
     assert tmp_path.is_relative_to(run)
     assert pathlib.Path(tempfile.gettempdir()) == run
-    child = subprocess.run(
+    child = run_bounded(
         [sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"],
         capture_output=True,
         text=True,
