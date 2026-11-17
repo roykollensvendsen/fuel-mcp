@@ -443,6 +443,10 @@ def _every_rule(figures_to: pathlib.Path | None) -> int:
             RECOVERY.write_text(json.dumps({"file": rule["file"], "original": text, "mutated": mutated}))
             path.write_text(mutated)
             standing = (path, text, mutated)
+            # Sent at once, not held until the run ends: in CI the output is a pipe, so a
+            # run that hangs would otherwise leave no word of which rule it hung on.
+            # RULE: a mutation run names each rule before it tests it
+            print(f"testing  {rule['name']}", flush=True)  # noqa: T201
             count, failed = run_suite()
             if not restore(path, text, mutated):
                 lost.append(rule["file"])
@@ -456,7 +460,7 @@ def _every_rule(figures_to: pathlib.Path | None) -> int:
             # A kill that can flip between runs has to say what flipped it.
             # RULE: a kill by another test names the tests that went red
             red = f", red: {', '.join(failed)}" if count and not by_its_own else ""
-            print(f"{verdict} {rule['name']}: {count}{red}")  # noqa: T201
+            print(f"{verdict} {rule['name']}: {count}{red}", flush=True)  # noqa: T201
     finally:
         if standing is not None:
             restore(*standing)
