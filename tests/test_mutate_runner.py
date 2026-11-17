@@ -68,6 +68,13 @@ def test_a_coloured_failure_line_is_still_attributed(monkeypatch, mutate):
     assert mutate.run_suite() == (1, ["test_a_token_works_once"])
 
 
+def test_a_test_that_errors_is_named_as_an_error(monkeypatch, mutate):
+    """A test whose setup broke is not a kill, and has to be told apart from one."""
+    broke = "ERROR tests/test_service.py::test_a_token_works_once - OSError\n1 error\n"
+    _suite_says(monkeypatch, mutate, broke)
+    assert mutate.run_suite() == (1, ["test_a_token_works_once (error)"])
+
+
 def _scaffold(tmp_path, monkeypatch, mutate, source):
     """A repository in `tmp_path` holding `source` as its only code, and no rows."""
     (tmp_path / "src").mkdir()

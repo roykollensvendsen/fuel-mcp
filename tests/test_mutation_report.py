@@ -65,6 +65,14 @@ def test_a_passing_mutation_run_reports_each_rule_killed_by_its_own_test(tmp_pat
     assert (figures["rules"][0]["tests_red"], figures["rules"][0]["own_test_red"]) == (1, True)
 
 
+def test_a_kill_by_another_test_names_the_tests_that_went_red(tmp_path, monkeypatch, capsys):
+    """A rule killed by a neighbour once flipped a run; the run has to say which test it was."""
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    assert _run(tmp_path, monkeypatch, ["test_a_neighbour", "test_another (error)"]) == 1
+    said = capsys.readouterr().out
+    assert "BY LUCK  a guard holds: 2, red: test_a_neighbour, test_another (error)" in said
+
+
 def test_the_readable_table_goes_to_the_check_s_summary(tmp_path, monkeypatch):
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
