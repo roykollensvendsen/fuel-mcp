@@ -68,6 +68,20 @@ def test_a_coloured_failure_line_is_still_attributed(monkeypatch, mutate):
     assert mutate.run_suite() == (1, ["test_a_token_works_once"])
 
 
+def test_a_real_mutation_run_has_no_time_limit(monkeypatch, mutate):
+    """Roy's rule: a run is never capped, so a suite started the usual way waits as long as it takes."""
+    asked = _suite_says(monkeypatch, mutate, "1 passed\n", returncode=0)
+    mutate.run_suite()
+    assert asked["timeout"] is None
+
+
+def test_a_test_s_scratch_suite_gives_up_at_its_bound(monkeypatch, mutate):
+    """A test that starts a small suite of its own bounds it, so a hang there fails that test."""
+    asked = _suite_says(monkeypatch, mutate, "1 passed\n", returncode=0)
+    mutate.run_suite(timeout=300)
+    assert asked["timeout"] == 300
+
+
 def test_a_test_that_errors_is_named_as_an_error(monkeypatch, mutate):
     """A test whose setup broke is not a kill, and has to be told apart from one."""
     broke = "ERROR tests/test_service.py::test_a_token_works_once - OSError\n1 error\n"
