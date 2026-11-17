@@ -20,6 +20,7 @@ import tempfile
 import time
 
 import pytest
+from bounded import WITHIN, run_bounded
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -100,7 +101,7 @@ sys.exit(mutate.main())
 
 
 def _git(project, *command):
-    return subprocess.run(
+    return run_bounded(
         ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *command],
         cwd=project,
         capture_output=True,
@@ -125,14 +126,14 @@ def _stopped_mid_mutation(tmp_path):
         stderr=subprocess.DEVNULL,
     )
     try:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + WITHIN
         while not list(temp.rglob("run-*")) and time.monotonic() < deadline:
             time.sleep(0.1)
         assert list(temp.rglob("run-*")), "the run never started its suite"
         time.sleep(0.5)  # into the suite, so the mutated file is standing
         assert (project / "src/rule.py").read_text() != GUARDED, "the rule was not switched off yet"
         run.send_signal(signal.SIGTERM)
-        assert run.wait(timeout=30) != 0
+        assert run.wait(timeout=WITHIN) != 0
     finally:
         run.kill()
     return temp, project
@@ -341,12 +342,12 @@ def test_a_stopped_measurement_stops_its_step_and_waits_for_it(tmp_path):
         stderr=subprocess.DEVNULL,
     )
     try:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + WITHIN
         while not (tmp_path / "started").exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         assert (tmp_path / "started").exists(), "the step never started"
         run.send_signal(signal.SIGINT)
-        assert run.wait(timeout=30) != 0
+        assert run.wait(timeout=WITHIN) != 0
     finally:
         run.kill()
     assert (tmp_path / "got-int").exists(), "the ratchet never passed the stop on to its step"

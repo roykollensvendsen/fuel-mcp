@@ -14,6 +14,7 @@ import sys
 import time
 
 import pytest
+from bounded import WITHIN
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -69,7 +70,7 @@ def _ratchet(tmp_path, mode="stop", *, own_group=False, starts=STRAIGHT):
         stderr=(tmp_path / "said").open("w"),
         start_new_session=own_group,
     )
-    _until(marks / "ready", 30)
+    _until(marks / "ready", WITHIN)
     assert (marks / "ready").exists(), "the child never started"
     return ratchet, temp, marks
 
@@ -82,7 +83,7 @@ def _until(path, seconds):
 
 def _ended(ratchet):
     try:
-        return ratchet.wait(timeout=60)
+        return ratchet.wait(timeout=WITHIN)
     finally:
         ratchet.kill()
 
@@ -100,7 +101,7 @@ def test_a_second_signal_cannot_cut_the_cleanup_short_of_a_measurement_in_a_whol
     """GitHub cancels with SIGINT and then SIGTERM; the child's cleanup must still run to its end."""
     ratchet, temp, marks = _ratchet(tmp_path)
     ratchet.send_signal(signal.SIGINT)
-    _until(marks / "cleaning", 30)
+    _until(marks / "cleaning", WITHIN)
     assert (marks / "cleaning").exists(), "the child was never told to stop"
     ratchet.send_signal(signal.SIGTERM)
     _ended(ratchet)
@@ -138,9 +139,9 @@ def test_a_measurement_s_child_writes_to_a_file_never_a_pipe(tmp_path):
     """After a kill -9 of the ratchet, a child writing to a pipe would die mid-mutation."""
     ratchet, _, marks = _ratchet(tmp_path, "orphan")
     ratchet.kill()
-    ratchet.wait()
+    ratchet.wait(timeout=WITHIN)
     (marks / "go").write_text("")
-    _until(marks / "finished", 30)
+    _until(marks / "finished", WITHIN)
     assert (marks / "finished").exists(), "the child died once the ratchet was gone"
 
 

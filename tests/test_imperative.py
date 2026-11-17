@@ -6,7 +6,6 @@ is the mechanism. Every case below is one somebody will write.
 
 import functools
 import pathlib
-import subprocess
 import sys
 
 import pytest
@@ -14,6 +13,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "scripts"))
 
 import imperative
+from bounded import run_bounded
 
 
 @pytest.mark.parametrize(
@@ -82,7 +82,7 @@ def test_the_range_is_read_from_git(tmp_path):
     that reads the repository it happens to be running in is a test whose answer
     depends on how it was started.
     """
-    run = functools.partial(subprocess.run, cwd=tmp_path, check=True, capture_output=True)
+    run = functools.partial(run_bounded, cwd=tmp_path, check=True, capture_output=True)
     run(["git", "init", "-q", "-b", "main"])
     run(["git", "config", "user.email", "test@example.com"])
     run(["git", "config", "user.name", "A Test"])
@@ -108,7 +108,7 @@ def test_an_empty_message_file_offends_nothing(tmp_path):
 
 def test_every_commit_means_every_commit_including_the_first():
     """A range excludes its own start, so root..HEAD silently skips the root."""
-    root = subprocess.run(
+    root = run_bounded(
         ["git", "rev-list", "--max-parents=0", "HEAD"], capture_output=True, text=True, check=True
     ).stdout.strip()
     every = {sha for sha, _ in imperative.subjects("HEAD")}

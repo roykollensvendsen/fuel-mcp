@@ -9,6 +9,7 @@ import threading
 import time
 
 import pytest
+from bounded import WITHIN
 
 from fuel_mcp.model import Fuel, OwnReport, SinkRefusedError, StationPrice
 from fuel_mcp.reports import TOKEN_FOR, UNDO_WITHIN, OwnReports, ReportChoices, Reporter
@@ -265,16 +266,21 @@ def test_a_send_past_its_time_limit_is_said_as_may_have_been_sent(tmp_path):
     answer = reporter.confirm(token)
     assert time.monotonic() - started < 1.0
     assert answer["say"] == "It may have been sent to Service North: it didn't answer in time."
-    for worker in threading.enumerate():  # let the slow sender end, so no thread outlives the test
-        if worker.name.startswith("fuel-mcp-send"):
-            worker.join()
+    _let_the_senders_end()  # the slow sender's own, so no thread outlives the test
 
 
-def _let_the_senders_end(held):
-    held.set()
+def _ended(worker, within=WITHIN):
+    """Wait for `worker` up to `within`, and fail the test, not hang it, if it is still going."""
+    worker.join(within)
+    assert not worker.is_alive(), f"{worker.name} was still going after {within} s"
+
+
+def _let_the_senders_end(held=None):
+    if held is not None:
+        held.set()
     for worker in threading.enumerate():
         if worker.name.startswith("fuel-mcp-send"):
-            worker.join()
+            _ended(worker)
 
 
 def test_all_sends_share_one_deadline(tmp_path):
@@ -362,7 +368,7 @@ def test_report_undo_and_confirm_run_one_at_a_time(tmp_path):
     local = _SlowList(tmp_path / "state", keep=KEEP)
     reporter = Reporter(FakeSource(now=NOW), Sinks(local, []), now=Clock())
     prices = [21.11, 21.22, 21.33, 21.44, 21.55]
-    start = threading.Barrier(len(prices))
+    start = threading.Barrier(len(prices), timeout=WITHIN)
 
     def report(price):
         start.wait()
@@ -372,7 +378,7 @@ def test_report_undo_and_confirm_run_one_at_a_time(tmp_path):
     for worker in workers:
         worker.start()
     for worker in workers:
-        worker.join()
+        _ended(worker)
     assert sorted(r.price for r in local.recent(Fuel.DIESEL, NOW)) == prices  # none lost
 
 
@@ -516,3 +522,16 @@ def test_own_reports_that_can_t_be_placed_are_left_out_and_the_source_still_answ
     for source in (refusing, unlisted, no_list):
         answer = FuelService(source, now=clock).price(Fuel.DIESEL, lat=0.0, lon=0.0, accuracy_m=10)
         assert answer["say"].startswith("Diesel is cheapest at Fake Fuel Beta, nineteen seventy-nine")
+
+
+def test_a_thread_that_never_ends_fails_its_test_instead_of_hanging():
+    """A mutant can keep a sender's thread alive; waiting on it without end would hang the run."""
+    never = threading.Event()
+    stuck = threading.Thread(target=never.wait, name="stuck", daemon=True)
+    stuck.start()
+    try:
+        with pytest.raises(AssertionError, match="still going after"):
+            _ended(stuck, within=0.2)
+    finally:
+        never.set()
+        stuck.join(1)

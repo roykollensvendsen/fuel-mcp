@@ -2,7 +2,6 @@
 """Nothing committed says where the owner lives or fills up."""
 
 import pathlib
-import subprocess
 import sys
 
 import pytest
@@ -10,6 +9,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "scripts"))
 
 import private_data_scan
+from bounded import run_bounded
 
 ROOT = pathlib.Path(__file__).parent.parent
 
@@ -124,17 +124,17 @@ def _repo_with_a_branch(tmp_path, *, on_main):
         ["config", "user.name", "t"],
     ]
     for args in git:
-        subprocess.run(["git", *args], cwd=repo, check=True)
+        run_bounded(["git", *args], cwd=repo, check=True)
 
     def commit(text):
         (repo / "notes.txt").write_text(text)
-        subprocess.run(["git", "add", "notes.txt"], cwd=repo, check=True)
-        subprocess.run(["git", "commit", "-q", "-m", "notes"], cwd=repo, check=True)
+        run_bounded(["git", "add", "notes.txt"], cwd=repo, check=True)
+        run_bounded(["git", "commit", "-q", "-m", "notes"], cwd=repo, check=True)
 
     commit(on_main)
-    subprocess.run(["git", "switch", "-q", "-c", "side"], cwd=repo, check=True)
+    run_bounded(["git", "switch", "-q", "-c", "side"], cwd=repo, check=True)
     commit("home = " + "61.98" + "765, 7.12" + "345\n")
-    subprocess.run(["git", "switch", "-q", "main"], cwd=repo, check=True)
+    run_bounded(["git", "switch", "-q", "main"], cwd=repo, check=True)
     return repo
 
 
@@ -153,4 +153,4 @@ def test_the_branch_own_history_is_still_scanned(tmp_path, monkeypatch):
 def test_the_commit_hook_runs_the_scan_on_what_is_staged():
     hook = (ROOT / ".githooks" / "pre-commit").read_text()
     assert "private_data_scan.py" in hook
-    assert subprocess.run(["sh", "-n", str(ROOT / ".githooks" / "pre-commit")], check=False).returncode == 0
+    assert run_bounded(["sh", "-n", str(ROOT / ".githooks" / "pre-commit")], check=False).returncode == 0
