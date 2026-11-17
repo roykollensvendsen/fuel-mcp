@@ -1,0 +1,5 @@
+[[rule]]
+name = "a test's scratch suite gives up at its bound"
+file = "scripts/mutate.py"
+find = 'timeout=timeout,'
+replace = 'timeout=None,'
