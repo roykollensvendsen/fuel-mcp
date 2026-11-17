@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Waits on another process that end in a failure of the waiting test, never in a hang.
 
-No limit is put on a test or a run from outside. Each wait carries its own bound, and
-running out fails that one test, so a mutant that hangs counts as killed.
+No limit is put on a test or a run from outside (Roy's rule). Each wait inside a test carries
+its own bound instead, so a child that never answers fails that one test, and a mutant that
+hangs counts as killed the way one that crashes does.
 """
 
-import contextlib
 import os
 import queue
 import signal
@@ -14,15 +14,17 @@ import threading
 
 import pytest
 
-#: The one bound for every wait in the tests: long enough that it fires only on a real hang.
+#: The bound on each wait, in seconds: one number for every repo, generous enough that it
+#: fires only on a real hang.
 WITHIN = 300
 
 
-def run_bounded(cmd, within=WITHIN, *, check=False, capture_output=False, input=None, **kw):  # noqa: A002
-    """Run `cmd` as subprocess.run does; a failure, not a hang, if it is still going after `within`.
+def run_bounded(cmd, within=WITHIN, *, check=False, input=None, capture_output=False, **kw):  # noqa: A002
+    """`subprocess.run` with a bound that, when it runs out, ends the child and all it started.
 
-    The child starts in a session of its own. On time, the whole group is killed with SIGKILL,
-    so a grandchild under a shell or `uv run` never lives on into the next tests.
+    `timeout=` alone kills only the direct child. A grandchild under `sh -c` or `uv run` would
+    keep running into the next tests. So the child gets a group of its own, and on time the
+    whole group gets SIGKILL: it cannot be caught, so `uv` cannot pass it on a second time.
     """
     if capture_output:
         kw["stdout"] = kw["stderr"] = subprocess.PIPE
@@ -32,10 +34,9 @@ def run_bounded(cmd, within=WITHIN, *, check=False, capture_output=False, input=
         try:
             out, err = child.communicate(input, timeout=within)
         except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):  # the whole group ended just now
-                os.killpg(child.pid, signal.SIGKILL)
+            os.killpg(child.pid, signal.SIGKILL)
             out, err = child.communicate()
-            pytest.fail(f"{cmd!r} still going after {within} s; it said: {out!r} {err!r}")
+            pytest.fail(f"{cmd!r} did not finish within {within} s; it wrote:\n{out}\n{err}")
     done = subprocess.CompletedProcess(cmd, child.returncode, out, err)
     if check:
         done.check_returncode()
