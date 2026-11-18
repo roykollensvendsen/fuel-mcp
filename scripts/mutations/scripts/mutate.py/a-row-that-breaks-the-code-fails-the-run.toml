@@ -1,0 +1,5 @@
+[[rule]]
+name = "a row that breaks the code fails the run"
+file = "scripts/mutate.py"
+find = 'return 1 if survived or lucky or lost or bad_rows else 0'
+replace = 'return 1 if survived or lucky or lost else 0'
