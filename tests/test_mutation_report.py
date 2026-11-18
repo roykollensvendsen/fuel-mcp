@@ -22,10 +22,11 @@ def _mutate():
     return module
 
 
-def _run(tmp_path, monkeypatch, red, *args, suite=None):
+def _run(tmp_path, monkeypatch, red, *args, suite=None, replace="if True:"):
     """mutate.py over one rule in a scratch tree, with `red` as what the suite reports.
 
     `suite`, when given, stands in for the suite instead, to see what was said before it ran.
+    `replace` is the row's replacement line.
     """
     mutate = _mutate()
     (tmp_path / "src").mkdir()
@@ -34,7 +35,7 @@ def _run(tmp_path, monkeypatch, red, *args, suite=None):
     (rows / "src/rule.py").mkdir(parents=True)
     (rows / "src/rule.py/a-guard-holds.toml").write_text(
         '[[rule]]\nname = "a guard holds"\nfile = "src/rule.py"\n'
-        "find = 'if guarded:'\nreplace = 'if True:'\n"
+        f"find = 'if guarded:'\nreplace = '{replace}'\n"
     )
     monkeypatch.setattr(mutate, "ROOT", tmp_path)
     monkeypatch.setattr(mutate, "ROWS", rows)
@@ -120,3 +121,27 @@ def test_the_readable_table_goes_to_the_check_s_summary(tmp_path, monkeypatch):
 
 def test_the_mutation_report_is_never_committed():
     assert "mutations.json" in (ROOT / ".gitignore").read_text().splitlines()
+
+
+def test_a_row_that_breaks_the_code_fails_the_run(tmp_path, monkeypatch):
+    """A cut-off row stops the module importing, and its own test going red then proves nothing."""
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    assert _run(tmp_path, monkeypatch, ["test_a_guard_holds"], replace="if guarded") == 1
+
+
+def test_a_broken_row_is_named_with_its_line_and_never_run(tmp_path, monkeypatch, capsys):
+    """The run says which row is wrong and where, and spends no suite on it."""
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    ran = []
+    _run(
+        tmp_path,
+        monkeypatch,
+        [],
+        suite=lambda: ran.append(1) or (1, ["test_a_guard_holds"]),
+        replace="if guarded",
+    )
+    said = capsys.readouterr().out
+    assert "BROKEN   a guard holds: the replacement is not valid code (line 1:" in said
+    assert "BROKEN ROW, so nothing was tested; make the replacement a whole valid line: a guard holds" in said
+    assert ran == []
+    assert (tmp_path / "src/rule.py").read_text() == "if guarded:\n    pass\n"
