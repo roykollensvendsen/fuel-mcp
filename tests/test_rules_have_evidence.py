@@ -142,3 +142,32 @@ def test_every_row_file_in_the_repository_is_where_its_rule_says():
     misfiled = _mutate().misfiled()
     assert not misfiled, "row files out of place: " + "; ".join(misfiled)
     assert not (ROOT / "scripts/mutations.toml").exists(), "the shared table is gone; give each row a file"
+
+
+def test_every_row_in_the_mutation_table_leaves_code_that_compiles():
+    """The runner replaces the whole line, keeping only its indentation.
+
+    A row written as if it swapped part of the line leaves a line cut off
+    mid-expression: the module no longer imports, every test in the file errors,
+    and the run reports the rule as killed by another test instead of naming the
+    row. Checked here, the slip shows on any run of the suite.
+    """
+    mutate = _mutate()
+    broken = []
+    for rule in mutate.all_rows():
+        text = (ROOT / rule["file"]).read_text(encoding="utf-8")
+        why = mutate.broken(rule["file"], mutate.switched_off(text, rule))
+        if why:
+            broken.append(f"{rule['name']}: {why}")
+    assert not broken, "rows whose replacement is not a whole line of valid code: " + "; ".join(broken)
+
+
+def test_a_row_cut_off_mid_line_is_called_broken_with_its_line():
+    """The check above is only worth something if it sees a broken row where there is one."""
+    mutate = _mutate()
+    rule = {"find": "if guarded:", "replace": "if guarded"}
+    mutated = mutate.switched_off("x = 1\nif guarded:\n    pass\n", rule)
+    assert mutated == "x = 1\nif guarded\n    pass\n"
+    assert mutate.broken("src/rule.py", mutated).startswith("line 2:")
+    assert mutate.broken("src/rule.py", "if guarded:\n    pass\n") is None
+    assert mutate.broken("README.md", mutated) is None  # only Python is compiled
