@@ -134,6 +134,33 @@ def line_of(text: str, pattern: str, occurrence: int) -> int:
     raise SystemExit(msg)
 
 
+def switched_off(text: str, rule: dict[str, Any]) -> str:
+    """The file's text with the rule's whole line replaced, keeping its indentation."""
+    lines = text.splitlines()
+    i = line_of(text, str(rule["find"]), int(rule.get("occurrence", 1)))
+    # Keep the line's own indentation: a replacement that carries its own
+    # would have to be kept in step with the source, and silently would not be.
+    indent = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
+    lines[i] = indent + str(rule["replace"]).strip()
+    return "\n".join(lines) + "\n"
+
+
+def broken(file: str, mutated: str) -> str | None:
+    """Why a mutated Python file no longer compiles, or None when it does.
+
+    A replacement cut off mid-expression stops the module importing, so every
+    test in its files errors and none is the rule's own: the run would call the
+    rule killed by another test when the row itself is wrong.
+    """
+    if not file.endswith(".py"):
+        return None
+    try:
+        compile(mutated, file, "exec")
+    except SyntaxError as e:
+        return f"line {e.lineno}: {e.msg}"
+    return None
+
+
 def _open_up(place: pathlib.Path) -> None:
     """Give the owner back every right on one folder or file, adding to the rights it has.
 
@@ -431,6 +458,7 @@ def _every_rule(figures_to: pathlib.Path | None) -> int:
     package_from_here()
     results = []
     lost: list[str] = []
+    bad_rows: list[str] = []
     standing: tuple[pathlib.Path, str, str] | None = None
     try:
         for rule in rules:
@@ -439,13 +467,12 @@ def _every_rule(figures_to: pathlib.Path | None) -> int:
             # bulk snapshot taken up front is restored over anything edited
             # since, and losing an edit that way costs more than the run.
             text = path.read_text()
-            lines = text.splitlines()
-            i = line_of(text, rule["find"], rule.get("occurrence", 1))
-            # Keep the line's own indentation: a replacement that carries its own
-            # would have to be kept in step with the source, and silently would not be.
-            indent = lines[i][: len(lines[i]) - len(lines[i].lstrip())]
-            lines[i] = indent + rule["replace"].strip()
-            mutated = "\n".join(lines) + "\n"
+            mutated = switched_off(text, rule)
+            why = broken(rule["file"], mutated)
+            if why:
+                bad_rows.append(rule["name"])
+                print(f"BROKEN   {rule['name']}: the replacement is not valid code ({why})", flush=True)  # noqa: T201
+                continue
             RECOVERY.write_text(json.dumps({"file": rule["file"], "original": text, "mutated": mutated}))
             path.write_text(mutated)
             standing = (path, text, mutated)
@@ -472,7 +499,13 @@ def _every_rule(figures_to: pathlib.Path | None) -> int:
             restore(*standing)
         RECOVERY.unlink(missing_ok=True)
         _tidy()
+    return _verdict(figures_to, results, bad_rows, lost)
 
+
+def _verdict(
+    figures_to: pathlib.Path | None, results: list[Result], bad_rows: list[str], lost: list[str]
+) -> int:
+    """Publish the figures, say what failed, and give the run's exit code."""
     survived = [name for name, _, count, _, _ in results if count == 0]
     lucky = [name for name, _, count, _, own in results if count and not own]
     # Written before a failing run exits: a run where a rule survived is exactly
@@ -484,10 +517,14 @@ def _every_rule(figures_to: pathlib.Path | None) -> int:
         print("SURVIVED, so nothing protects them:", ", ".join(survived))  # noqa: T201
     if lucky:
         print("KILLED BY ANOTHER TEST, so the evidence is not about them:", ", ".join(lucky))  # noqa: T201
+    if bad_rows:
+        fix = "make the replacement a whole valid line"
+        print(f"BROKEN ROW, so nothing was tested; {fix}:", ", ".join(bad_rows))  # noqa: T201
     if lost:
         print("CHANGED WHILE MUTATED, so left as they are:", ", ".join(sorted(set(lost))))  # noqa: T201
         print("Edit the tree while this runs and the result is not about your code.")  # noqa: T201
-    return 1 if survived or lucky or lost else 0
+    # RULE: a row that breaks the code fails the run
+    return 1 if survived or lucky or lost or bad_rows else 0
 
 
 Result = tuple[str, str, int, str, bool]
