@@ -61,10 +61,10 @@ def test_a_failed_private_write_leaves_the_old_file_and_no_temporary(tmp_path, m
     def refused(self, target):
         raise OSError(28, "disk full")
 
-    monkeypatch.setattr(type(path), "replace", refused)
-    with pytest.raises(OSError, match="disk full"):
-        write_private(path, b"new")
-    monkeypatch.undo()
+    with monkeypatch.context() as patch:
+        patch.setattr(type(path), "replace", refused)
+        with pytest.raises(OSError, match="disk full"):
+            write_private(path, b"new")
     assert path.read_bytes() == b"old"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["file"]
 
@@ -104,12 +104,12 @@ def test_a_private_file_s_folder_is_the_owner_s_and_closed_to_others(tmp_path, m
     folder = tmp_path / "state"
     folder.mkdir()
     folder.chmod(mode)
-    if theirs:
-        someone_else = os.getuid() + 1
-        monkeypatch.setattr(safe_file.os, "getuid", lambda: someone_else)
-    with pytest.raises(PrivateFileError, match=said.format(folder=folder)):
-        write_private(folder / "file", b"words")
-    monkeypatch.undo()
+    with monkeypatch.context() as patch:
+        if theirs:
+            someone_else = os.getuid() + 1
+            patch.setattr(safe_file.os, "getuid", lambda: someone_else)
+        with pytest.raises(PrivateFileError, match=said.format(folder=folder)):
+            write_private(folder / "file", b"words")
     assert list(folder.iterdir()) == []
     assert stat.S_IMODE(folder.stat().st_mode) == mode, "the folder is left as the owner set it"
     assert str(folder) in caplog.text
