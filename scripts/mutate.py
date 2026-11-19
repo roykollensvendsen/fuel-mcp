@@ -510,7 +510,8 @@ def _verdict(
     lucky = [name for name, _, count, _, own in results if count and not own]
     # Written before a failing run exits: a run where a rule survived is exactly
     # what the checks' page has to show, not the last run that passed.
-    publish(figures_to, results, survived, lucky)
+    # RULE: a broken row is named in the run's report
+    publish(figures_to, results, survived, lucky, bad_rows)
     proven = len(results) - len(survived) - len(lucky)
     print(f"\n{proven}/{len(results)} rules turned off the test that names them")  # noqa: T201
     if survived:
@@ -530,25 +531,31 @@ def _verdict(
 Result = tuple[str, str, int, str, bool]
 
 
-def publish(to: pathlib.Path | None, results: list[Result], survived: list[str], lucky: list[str]) -> None:
+def publish(
+    to: pathlib.Path | None, results: list[Result], survived: list[str], lucky: list[str], bad_rows: list[str]
+) -> None:
     """Give the run to the checks: its figures to `to`, its table to the run's summary page."""
     if to:
-        to.write_text(json.dumps(figures(results), indent=2) + "\n")
+        to.write_text(json.dumps(figures(results, bad_rows), indent=2) + "\n")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with pathlib.Path(summary).open("a") as page:
-            page.write(report(results, survived, lucky))
+            page.write(report(results, survived, lucky, bad_rows))
 
 
-def figures(results: list[Result]) -> dict[str, Any]:
-    """The run as numbers: per rule, its name, file, tests gone red and whether its own was one."""
+def figures(results: list[Result], bad_rows: list[str]) -> dict[str, Any]:
+    """The run as numbers: per rule, its name, file, tests gone red and whether its own was one.
+
+    Rows that broke the code ran no suite, so they are listed apart under `broken`.
+    """
     rules = [
         {"name": name, "file": file, "tests_red": count, "own_test_red": own_red}
         for name, file, count, _, own_red in results
     ]
-    return {"killed": sum(rule["own_test_red"] for rule in rules), "total": len(rules), "rules": rules}
+    killed = sum(rule["own_test_red"] for rule in rules)
+    return {"killed": killed, "total": len(rules), "rules": rules, "broken": bad_rows}
 
 
-def report(results: list[Result], survived: list[str], lucky: list[str]) -> str:
+def report(results: list[Result], survived: list[str], lucky: list[str], bad_rows: list[str]) -> str:
     """Render the run as a readable table, for the checks' summary page."""
     rows = "\n".join(
         f"| {name} | {count} | `{own}` | {'yes' if by_own else 'NO'} |"
@@ -559,6 +566,7 @@ def report(results: list[Result], survived: list[str], lucky: list[str]) -> str:
         f"**Result: {proven} of {len(results)} rules turned off the test that names them.**"
         + (" None survived." if not survived else f" Survived: {', '.join(survived)}.")
         + ("" if not lucky else f" Killed only by other tests: {', '.join(lucky)}.")
+        + ("" if not bad_rows else f" Broken rows, so nothing was tested: {', '.join(bad_rows)}.")
     )
     return f"""# Every rule, turned off in turn
 
