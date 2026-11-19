@@ -162,7 +162,7 @@ class Reporter:
         if not labels:
             return _said(saved, success=True)
         token = secrets.token_urlsafe(9)
-        # RULE: a report is sent only with a token from Roy's yes
+        # RULE: a report is sent only with a token from the owner's yes
         self._asked[token] = _Asked(report, frozenset(labels), report.reported_at)
         return {**_said(f"{saved} Send it to {_and(labels)} too?", success=True), "token": token}
 
