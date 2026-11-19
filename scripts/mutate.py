@@ -536,23 +536,19 @@ def publish(
 ) -> None:
     """Give the run to the checks: its figures to `to`, its table to the run's summary page."""
     if to:
-        to.write_text(json.dumps(figures(results, bad_rows), indent=2) + "\n")
+        to.write_text(json.dumps(figures(results), indent=2) + "\n")
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with pathlib.Path(summary).open("a") as page:
             page.write(report(results, survived, lucky, bad_rows))
 
 
-def figures(results: list[Result], bad_rows: list[str]) -> dict[str, Any]:
-    """The run as numbers: per rule, its name, file, tests gone red and whether its own was one.
-
-    Rows that broke the code ran no suite, so they are listed apart under `broken`.
-    """
+def figures(results: list[Result]) -> dict[str, Any]:
+    """The run as numbers: per rule, its name, file, tests gone red and whether its own was one."""
     rules = [
         {"name": name, "file": file, "tests_red": count, "own_test_red": own_red}
         for name, file, count, _, own_red in results
     ]
-    killed = sum(rule["own_test_red"] for rule in rules)
-    return {"killed": killed, "total": len(rules), "rules": rules, "broken": bad_rows}
+    return {"killed": sum(rule["own_test_red"] for rule in rules), "total": len(rules), "rules": rules}
 
 
 def report(results: list[Result], survived: list[str], lucky: list[str], bad_rows: list[str]) -> str:
@@ -564,7 +560,8 @@ def report(results: list[Result], survived: list[str], lucky: list[str], bad_row
     proven = len(results) - len(survived) - len(lucky)
     verdict = (
         f"**Result: {proven} of {len(results)} rules turned off the test that names them.**"
-        + (" None survived." if not survived else f" Survived: {', '.join(survived)}.")
+        + (" None survived." if not (survived or bad_rows) else "")
+        + ("" if not survived else f" Survived: {', '.join(survived)}.")
         + ("" if not lucky else f" Killed only by other tests: {', '.join(lucky)}.")
         + ("" if not bad_rows else f" Broken rows, so nothing was tested: {', '.join(bad_rows)}.")
     )
