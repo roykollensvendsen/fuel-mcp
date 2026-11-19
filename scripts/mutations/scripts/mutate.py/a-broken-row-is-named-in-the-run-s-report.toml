@@ -1,0 +1,5 @@
+[[rule]]
+name = "a broken row is named in the run's report"
+file = "scripts/mutate.py"
+find = 'publish\(figures_to, results, survived, lucky, bad_rows\)'
+replace = 'publish(figures_to, results, survived, lucky, [])'
