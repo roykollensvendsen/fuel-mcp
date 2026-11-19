@@ -1,5 +1,5 @@
 [[rule]]
-name = "a report is sent only with a token from Roy's yes"
+name = "a report is sent only with a token from the owner's yes"
 file = "src/fuel_mcp/reports.py"
 find = '^\s*self\._asked\[token\] = _Asked\(report, frozenset\(labels\), report\.reported_at\)$'
 replace = 'self._asked[token] = [self._send(s, report) for s in self.sinks.private] and _Asked(report, frozenset(labels), report.reported_at)'

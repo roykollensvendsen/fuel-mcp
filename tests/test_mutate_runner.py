@@ -69,7 +69,7 @@ def test_a_coloured_failure_line_is_still_attributed(monkeypatch, mutate):
 
 
 def test_a_real_mutation_run_has_no_time_limit(monkeypatch, mutate):
-    """Roy's rule: a run is never capped, so a suite started the usual way waits as long as it takes."""
+    """The owner's rule: a run is never capped, so a suite started the usual way waits as long as it takes."""
     asked = _suite_says(monkeypatch, mutate, "1 passed\n", returncode=0)
     mutate.run_suite()
     assert asked["timeout"] is None

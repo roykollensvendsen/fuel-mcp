@@ -191,7 +191,7 @@ def test_confirm_with_no_sender_set_up_sends_nothing(tmp_path):
     assert answer == {"success": False, "say": "There's no sender set up. Nothing was sent."}
 
 
-def test_a_report_is_sent_only_with_a_token_from_roy_s_yes(tmp_path):
+def test_a_report_is_sent_only_with_a_token_from_the_owner_s_yes(tmp_path):
     clock = Clock()
     north, other = Sender("Service North"), Sender("Service Other")
     reporter, _ = _reporter(tmp_path, clock, private=[north, other])
