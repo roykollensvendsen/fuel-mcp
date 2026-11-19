@@ -57,7 +57,6 @@ def test_a_failing_mutation_run_still_writes_its_report(tmp_path, monkeypatch):
         "killed": 0,
         "total": 1,
         "rules": [{"name": "a guard holds", "file": "src/rule.py", "tests_red": 0, "own_test_red": False}],
-        "broken": [],
     }
 
 
@@ -149,14 +148,17 @@ def test_a_broken_row_is_named_with_its_line_and_never_run(tmp_path, monkeypatch
 
 
 def test_a_broken_row_is_named_in_the_run_s_report(tmp_path, monkeypatch):
-    """The checks' page and figures are what is read after a run, not its log.
+    """The checks' page is what is read after a run, not its log.
 
     A broken row tested nothing, so it is missing from the table of rules; the page has to
     say so, or a failing run would show a table where everything looks proven.
+    The figures keep the one shape every repo's health page reads, so they gain no key here.
     """
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     figures = tmp_path / "mutations.json"
     assert _run(tmp_path, monkeypatch, [], "--json", str(figures), replace="if guarded") == 1
-    assert json.loads(figures.read_text())["broken"] == ["a guard holds"]
-    assert "Broken rows, so nothing was tested: a guard holds." in summary.read_text()
+    assert set(json.loads(figures.read_text())) == {"killed", "total", "rules"}
+    page = summary.read_text()
+    assert "Broken rows, so nothing was tested: a guard holds." in page
+    assert "None survived." not in page  # nothing ran, so nothing can be said to have survived
