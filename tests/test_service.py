@@ -269,6 +269,17 @@ def test_the_search_never_goes_past_the_farthest_distance_set():
     )
 
 
+def test_a_farthest_distance_under_5_km_is_the_one_search():
+    four = _Placed(("Fake Fuel Four", 4, 18.5, 1))
+    assert _service(four, farthest_km=3).price(Fuel.DIESEL, lat=0.0, lon=0.0)["say"] == (
+        "I can't see a diesel price within 3 kilometres."
+    )
+    assert (
+        _service(four, farthest_km=4.5).price(Fuel.DIESEL, lat=0.0, lon=0.0)["station"]["name"]
+        == "Fake Fuel Four"
+    )
+
+
 def test_a_price_older_than_the_old_limit_is_said_as_only_an_old_price():
     stale = _Placed(("Fake Fuel Stale", 3, 19.9, 40))
     answer = _service(stale).price(Fuel.DIESEL, lat=0.0, lon=0.0)

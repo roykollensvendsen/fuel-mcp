@@ -195,13 +195,16 @@ def test_the_farthest_search_and_the_old_price_limit_are_read_from_the_config(tm
         ("farthest_km = inf", "farthest_km", "a number from 1 to 100"),
         ("farthest_km = nan", "farthest_km", "a number from 1 to 100"),
         ("farthest_km = 101", "farthest_km", "a number from 1 to 100"),
+        ("farthest_km = " + "9" * 400, "farthest_km", "a number from 1 to 100"),
+        ("old_after_days = " + "9" * 400, "old_after_days", "a whole number from 7 to 3650"),
         ("old_after_days = 6", "old_after_days", "a whole number from 7 to 3650"),
         ("old_after_days = -1", "old_after_days", "a whole number from 7 to 3650"),
         ("old_after_days = 2.5", "old_after_days", "a whole number from 7 to 3650"),
     ],
 )
 def test_a_search_setting_outside_its_limits_names_the_fix_and_the_file(tmp_path, line, key, fix):
-    # A farthest_km of inf would step out for ever, and nan matches no station. An old limit under
+    # A farthest_km of inf would step out for ever, and nan matches no station. TOML reads a
+    # 400-digit number as a Python int too big for a float, which must not crash the check. An old limit under
     # a week would never call a price old, since a price is current for a week.
     with pytest.raises(SettingsError, match=rf"{key} must be {fix}.*Fix {key} in .*config\.toml"):
         load_settings(_config(tmp_path, line + "\n"))
