@@ -243,6 +243,8 @@ def _within(
     """The number set for `key`, or its default; anything outside `limits` names the fix.
 
     TOML allows inf and nan. Either would pass a plain "above 0": inf would step out for ever.
+    It also reads a number of any length as an int, and one too big for a float would make
+    `math.isfinite` raise. So the limits are compared first, and a huge int fails them.
     """
     default = DEFAULTS[key]
     value = table.get(key, default)
@@ -250,7 +252,7 @@ def _within(
     number = value if isinstance(value, kinds) and not isinstance(value, bool) else math.nan
     low, high = limits
     # RULE: a search setting outside its limits names the fix and the file
-    if not (math.isfinite(number) and low <= number <= high):
+    if not (low <= number <= high and math.isfinite(number)):
         kind = "a whole number" if whole else "a number"
         msg = f"{key} must be {kind} from {low} to {high}, such as {key} = {default:g}. Fix {key} in {path}"
         raise SettingsError(msg)

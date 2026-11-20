@@ -36,7 +36,8 @@ It takes `fuel` (`diesel`, `petrol95` or `petrol98`), and the
 phone's position as `lat`, `lon` and `accuracy_m`. The search widens by the
 position's accuracy, which is taken as 100 m when not given.
 It looks within 5 km first. With no price from the last week there, it
-steps out to 10 km, then 20 km, and says how far it had to look. With none
+steps out to 10 km, then 20 km, and says how far it had to look. A
+`farthest_km` under 5 km is the one search, out to that distance. With none
 from the last week at all, it gives the latest it found and its date. When
 even that is older than 30 days, it starts with "Only an old price". With no
 position, it asks where. A price more than a week old is never said as
